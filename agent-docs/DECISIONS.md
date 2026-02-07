@@ -137,3 +137,36 @@ Chronological record of product and technical decisions for context preservation
 4. CLAUDE.md: Added "Agent-to-Frontend Data Contract" section with the canonical schema
 
 **Rationale:** The original prompts were ambiguous about JSON structure. The Verifier could reasonably put `contraryEvidence` at the finding root level instead of inside `explanation`, which would silently break the Report component (it reads `expl?.contraryEvidence` where `expl = activeData.explanation`). Making the schema explicit in the prompts prevents this class of silent rendering failures.
+
+---
+
+## Decision 12: Multi-Paragraph Sections via Break Nodes
+
+**Date:** Feb 7, 2026
+**Context:** The prototype has separate `<Paragraph>` blocks within sections (Financial Performance has 2, Product & Technology has 2, Competitive Landscape has 2). The app rendered ALL content in a single `<p>` tag per section — creating a wall of text.
+**Decision:** Added `{ "type": "break" }` as a third content item type. Report.jsx splits content arrays on break nodes and renders separate `<p>` elements.
+**Changes:**
+1. Report.jsx: Added `splitIntoParagraphs()` helper, changed section rendering from single `<p>` to multiple `<p>` blocks
+2. Synthesizer prompt: Added break node to schema example, added rule that sections with 4+ findings should have at least one break
+3. CLAUDE.md: Documented break node in content array types
+
+---
+
+## Decision 13: Dynamic Methodology Overview
+
+**Date:** Feb 7, 2026
+**Context:** The prototype has a rich overview explanation with specific data sources, corrections applied, and evidence items. The app had a hardcoded generic paragraph.
+**Decision:** Verifier now produces `meta.methodology` with a full explanation object (title, text, supportingEvidence, contraryEvidence). Report.jsx reads this for the overview panel, with a hardcoded fallback if absent.
+**Changes:**
+1. Verifier prompt: Added methodology schema to output requirements
+2. Report.jsx ExplanationPanel: Reads `overviewData` (from `meta.methodology`) for overview text and evidence, falls back to generic text
+3. Report.jsx: Passes `overviewData={meta?.methodology}` to ExplanationPanel
+
+---
+
+## Decision 14: Pre-wrap Explanation Text
+
+**Date:** Feb 7, 2026
+**Context:** The prototype uses `whiteSpace: "pre-wrap"` on explanation text so `\n` renders as line breaks. The app collapsed multi-paragraph explanations into one blob.
+**Decision:** Added `whiteSpace: "pre-wrap"` to both the overview text and finding explanation text in ExplanationPanel.
+**Rationale:** Explanation text (especially methodology overviews) often has logical paragraph breaks that should be preserved visually.
