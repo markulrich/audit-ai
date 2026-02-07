@@ -134,6 +134,7 @@ This is the most important section of this file. The Report.jsx component reads 
 | `certainty` | Verifier | 1-99%, at finding root level |
 | `explanation.contraryEvidence` | Verifier | Synthesizer sets to `[]` |
 | `meta.overallCertainty` | Verifier | Arithmetic mean of all certainty scores |
+| `meta.methodology` | Verifier | Overview explanation with sources, corrections, caveats |
 
 ### URL conventions in evidence items:
 
@@ -144,6 +145,18 @@ This is the most important section of this file. The Report.jsx component reads 
 - Internal methodology: `"internal"`
 
 Report.jsx filters out "general", "various", "derived", and "internal" from displaying the source link.
+
+### Content array item types:
+
+- `{ "type": "finding", "id": "f1" }` — Reference to a finding (rendered as interactive span)
+- `{ "type": "text", "value": "..." }` — Connecting prose (rendered as plain text)
+- `{ "type": "break" }` — Paragraph separator (Report.jsx splits content into `<p>` elements on these)
+
+Sections with 4+ findings should have at least one break for visual breathing room.
+
+### Methodology overview:
+
+The Verifier produces a `meta.methodology` object with an `explanation` containing `title`, `text`, `supportingEvidence`, and `contraryEvidence`. Report.jsx reads this for the overview panel (when user clicks the certainty banner). If `meta.methodology` is absent, a hardcoded fallback is shown.
 
 ### Section IDs (canonical):
 

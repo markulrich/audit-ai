@@ -53,7 +53,11 @@ YOUR TASK: Given the evidence below, produce a structured JSON report. You MUST 
         { "type": "text", "value": ", " },
         { "type": "finding", "id": "f2" },
         { "type": "text", "value": ". " },
-        { "type": "text", "value": "Some connecting prose that is NOT a finding..." }
+        { "type": "text", "value": "Some connecting prose that is NOT a finding..." },
+        { "type": "break" },
+        { "type": "finding", "id": "f3" },
+        { "type": "text", "value": ". " },
+        { "type": "text", "value": "Second paragraph with more findings and analysis..." }
       ]
     }
   ],
@@ -80,7 +84,7 @@ CRITICAL SCHEMA RULES (the frontend WILL BREAK if you deviate):
 - "findings[].explanation.supportingEvidence" and "findings[].explanation.contraryEvidence" MUST be arrays of { source, quote, url } objects and MUST live INSIDE the "explanation" object
 - "findings[].text" is the finding sentence. "findings[].explanation.text" is the explanation paragraph. These are DIFFERENT fields.
 - "findings[].section" must match the "sections[].id" it belongs to
-- "sections[].content" is an array that interleaves { "type": "finding", "id": "fN" } refs with { "type": "text", "value": "..." } connectors
+- "sections[].content" is an array that interleaves { "type": "finding", "id": "fN" } refs with { "type": "text", "value": "..." } connectors and { "type": "break" } paragraph separators
 - The "url" field in evidence items should be a domain name (e.g., "nvidianews.nvidia.com", "sec.gov", "seekingalpha.com"), NOT a full URL. For general knowledge use "general". For calculated values use "derived". For multiple non-specific sources use "various".
 - "meta.rating" must be exactly one of: "Overweight", "Equal-Weight", "Underweight"
 
@@ -97,10 +101,11 @@ RULES FOR FINDINGS:
 
 RULES FOR SECTIONS:
 1. Use these section IDs: investment_thesis, recent_price_action, financial_performance, product_and_technology, competitive_landscape, industry_and_macro, key_risks, analyst_consensus
-2. The "content" array weaves findings into natural prose. Reading all the text values and finding texts in order should produce a coherent paragraph
+2. The "content" array weaves findings into natural prose. Reading all the text values and finding texts in order should produce coherent paragraphs
 3. Connecting text should read like professional equity research — not bullet points
 4. Each section should have 3-5 findings
 5. Include a "title" field for each section (e.g., "Investment Thesis", "Recent Price Action")
+6. Use { "type": "break" } to separate logical paragraph groups within a section. Sections with 4+ findings SHOULD have at least one break. For example: first paragraph covers the headline metrics, break, second paragraph covers details and context. This creates visual breathing room — a wall of text is unprofessional
 
 RULES FOR META:
 1. The rating should reflect the evidence (Overweight if bullish, Underweight if bearish)
