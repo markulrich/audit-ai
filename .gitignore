@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+coverage/
+.vite/
+*.tsbuildinfo
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.der
+*.csr
+*.kdbx
+*.secret
+secrets/
+.secrets/
+*.local
+
+# Logs and runtime files
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.pid
+*.pid.lock
+
+# Tooling caches/artifacts
+.cache/
+.npm/
+.eslintcache
+.playwright/
+playwright-report/
+test-results/
+
+# OS/editor metadata
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
