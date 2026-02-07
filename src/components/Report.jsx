@@ -326,7 +326,9 @@ function ExplanationPanel({ activeData, isOverview, findingIndex, total, onNavig
 
       <div style={{ flex: 1, overflow: "auto", padding: "16px 20px" }}>
         <h3 style={{ fontSize: 15, fontWeight: 700, color: COLORS.text, margin: "0 0 10px", lineHeight: 1.3 }}>
-          {expl?.title || (isOverview ? "Report Methodology" : "Explanation")}
+          {isOverview
+            ? (overviewData?.explanation?.title || "Report Methodology")
+            : (expl?.title || "Explanation")}
         </h3>
         <div style={{ marginBottom: 12 }}>
           <span
