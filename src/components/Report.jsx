@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 
 // ─── Styles ────────────────────────────────────────────────────────────────────
 
@@ -67,7 +67,7 @@ function FindingSpan({ finding, isActive, onActivate }) {
       role="button"
       tabIndex={0}
       aria-label={`Finding: ${finding.text}. Certainty ${finding.certainty}%. Click for explanation.`}
-      onMouseEnter={() => { setHovered(true); onActivate(finding.id); }}
+      onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onClick={() => onActivate(finding.id)}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onActivate(finding.id); } }}
@@ -201,7 +201,7 @@ function FeedbackWidget({ findingId }) {
           ▼
         </button>
         {submitted && (
-          <span style={{ fontSize: 11, color: COLORS.green, fontWeight: 500 }}>✓ Recorded</span>
+          <span style={{ fontSize: 11, color: COLORS.green, fontWeight: 500 }}>✓ Thanks</span>
         )}
       </div>
       {showTextarea && (
@@ -226,7 +226,7 @@ function FeedbackWidget({ findingId }) {
           />
           <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
             <button
-              onClick={() => { setSubmitted(true); setShowTextarea(false); }}
+              onClick={() => { console.log("[feedback]", { findingId, feedback, feedbackText }); setSubmitted(true); setShowTextarea(false); }}
               style={{
                 padding: "4px 14px",
                 fontSize: 11,
@@ -435,18 +435,21 @@ export default function Report({ data, onBack }) {
   const { meta, sections, findings } = data;
 
   // Guard: empty findings
-  const safeFindings = Array.isArray(findings) ? findings : [];
-  const safeSections = Array.isArray(sections) ? sections : [];
+  const safeFindings = useMemo(() => Array.isArray(findings) ? findings : [], [findings]);
+  const safeSections = useMemo(() => Array.isArray(sections) ? sections : [], [sections]);
 
   // Build a lookup map
-  const findingsMap = {};
-  safeFindings.forEach((f) => { findingsMap[f.id] = f; });
+  const findingsMap = useMemo(() => {
+    const map = {};
+    safeFindings.forEach((f) => { map[f.id] = f; });
+    return map;
+  }, [safeFindings]);
 
-  const overallCertainty = meta?.overallCertainty || (
+  const overallCertainty = useMemo(() => meta?.overallCertainty || (
     safeFindings.length > 0
       ? Math.round(safeFindings.reduce((s, f) => s + (f.certainty || 50), 0) / safeFindings.length)
       : 0
-  );
+  ), [meta?.overallCertainty, safeFindings]);
 
   const isOverview = activeId === "overview";
   const activeFinding = isOverview ? null : findingsMap[activeId] || null;
@@ -500,9 +503,9 @@ export default function Report({ data, onBack }) {
   const keyStats = meta?.keyStats || [];
 
   // Filter sections that have at least one valid finding
-  const visibleSections = safeSections.filter((s) =>
+  const visibleSections = useMemo(() => safeSections.filter((s) =>
     (s.content || []).some((item) => item.type === "finding" && findingsMap[item.id])
-  );
+  ), [safeSections, findingsMap]);
 
   // Render a content block (finding or text)
   const renderContent = (item, i) => {
@@ -887,9 +890,11 @@ export default function Report({ data, onBack }) {
               >
                 <div
                   style={{
-                    padding: "8px 0",
+                    padding: "8px 12px 0",
                     display: "flex",
                     justifyContent: "center",
+                    alignItems: "center",
+                    position: "relative",
                   }}
                 >
                   <div
@@ -900,6 +905,24 @@ export default function Report({ data, onBack }) {
                       background: COLORS.border,
                     }}
                   />
+                  <button
+                    onClick={() => setShowPanel(false)}
+                    aria-label="Close explanation panel"
+                    style={{
+                      position: "absolute",
+                      right: 12,
+                      top: 4,
+                      border: "none",
+                      background: "transparent",
+                      fontSize: 18,
+                      color: COLORS.textMuted,
+                      cursor: "pointer",
+                      padding: "4px 8px",
+                      borderRadius: 4,
+                    }}
+                  >
+                    ✕
+                  </button>
                 </div>
                 {panelContent}
               </div>

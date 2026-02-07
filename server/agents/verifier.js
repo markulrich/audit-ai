@@ -169,15 +169,19 @@ Return the complete report JSON. No markdown fences. No commentary.`,
     const rawText = response.content?.[0]?.text || "";
     const match = rawText.match(/\{[\s\S]*\}/);
     if (match) {
-      const report = JSON.parse(match[0]);
-      if (!report.meta?.overallCertainty && report.findings?.length > 0) {
-        report.meta.overallCertainty = Math.round(
-          report.findings.reduce((s, f) => s + (f.certainty || 50), 0) /
-            report.findings.length
-        );
+      try {
+        const report = JSON.parse(match[0]);
+        if (!report.meta?.overallCertainty && report.findings?.length > 0) {
+          report.meta.overallCertainty = Math.round(
+            report.findings.reduce((s, f) => s + (f.certainty || 50), 0) /
+              report.findings.length
+          );
+        }
+        cleanOrphanedRefs(report);
+        return report;
+      } catch (parseErr) {
+        console.error("Verification agent regex fallback parse error:", parseErr.message);
       }
-      cleanOrphanedRefs(report);
-      return report;
     }
     // Last resort: return draft with default certainty scores
     console.warn("Verification failed, returning draft with default scores");
