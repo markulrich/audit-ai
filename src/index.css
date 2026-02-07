@@ -1,0 +1,29 @@
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  font-family: "Inter", "Helvetica Neue", system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: #fafafa;
+  color: #1a1a2e;
+}
+
+::selection {
+  background: #1a1a2e;
+  color: #fff;
+}
+
+textarea:focus,
+input:focus {
+  outline: none;
+}
