@@ -1,0 +1,94 @@
+name: Preview Deploy
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, closed]
+
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+  PREVIEW_APP: doublyai-pr-${{ github.event.pull_request.number }}
+
+jobs:
+  deploy-preview:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Create preview app (if needed)
+        run: |
+          flyctl apps list | grep -q "$PREVIEW_APP" || \
+            flyctl apps create "$PREVIEW_APP" --org personal
+
+      - name: Set secrets on preview app
+        run: |
+          echo "Setting ANTHROPIC_API_KEY on preview app..."
+          flyctl secrets set ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
+            --app "$PREVIEW_APP" --stage
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: Deploy preview
+        run: |
+          flyctl deploy \
+            --app "$PREVIEW_APP" \
+            --region sjc \
+            --ha=false \
+            --vm-size shared-cpu-1x \
+            --vm-memory 256
+
+      - name: Post preview URL
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const url = `https://${process.env.PREVIEW_APP}.fly.dev`;
+            const body = `🚀 **Preview deployed!**\n\n${url}\n\n_This preview will be destroyed when the PR is closed._`;
+
+            // Find existing bot comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('Preview deployed')
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+  teardown-preview:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Setup flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Destroy preview app
+        run: |
+          flyctl apps list | grep -q "$PREVIEW_APP" && \
+            flyctl apps destroy "$PREVIEW_APP" --yes || \
+            echo "Preview app $PREVIEW_APP not found, skipping."
