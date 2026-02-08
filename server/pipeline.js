@@ -94,7 +94,7 @@ export async function runPipeline(query, send, isAborted = () => false, reasonin
     stage: "researching",
     message: `Gathering evidence on ${domainProfile.companyName} (${domainProfile.ticker})...`,
     percent: 15,
-    detail: `Collecting ${config.evidenceMinItems}+ data points across financials, products, competition, risks, and analyst sentiment. Using ${config.researcherModel || ANTHROPIC_MODEL} with ${config.researcherMaxTokens.toLocaleString()} max output tokens.`,
+    detail: `Collecting ${config.evidenceMinItems}+ data points across financials, products, competition, risks, and analyst sentiment. Using ${config.researcherModel || ANTHROPIC_MODEL}.`,
     substeps: [
       { text: "SEC filings and earnings releases", status: "active" },
       { text: "Analyst consensus and price targets", status: "active" },

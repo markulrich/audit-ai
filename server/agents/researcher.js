@@ -14,7 +14,6 @@ export async function research(query, domainProfile, send, config = {}) {
 
   const params = {
     ...(config.researcherModel && { model: config.researcherModel }),
-    max_tokens: config.researcherMaxTokens || 12288,
     system: `You are a senior financial research analyst gathering evidence for an equity research report.
 
 YOUR ROLE: Collect factual evidence ONLY. Do not synthesize, do not editorialize, do not draw conclusions. You are a data collector.
@@ -77,7 +76,7 @@ Respond with a JSON array of evidence items. JSON only, no markdown.`,
       trace: {
         request: {
           model: params.model || "(default)",
-          max_tokens: params.max_tokens,
+          max_tokens: "(model max)",
           system: params.system,
           messages: params.messages,
         },

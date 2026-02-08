@@ -18,12 +18,6 @@ export const REASONING_LEVELS = {
     synthesizerModel: undefined,
     verifierModel: undefined,
 
-    // Max tokens — set generous ceilings; prompt constraints control actual length
-    classifierMaxTokens: 1024,
-    researcherMaxTokens: 8192,
-    synthesizerMaxTokens: 8192,
-    verifierMaxTokens: 8192,
-
     // Researcher
     evidenceMinItems: 2,
 
@@ -49,11 +43,6 @@ export const REASONING_LEVELS = {
     synthesizerModel: undefined,
     verifierModel: undefined,
 
-    classifierMaxTokens: 512,
-    researcherMaxTokens: 8192,
-    synthesizerMaxTokens: 8192,
-    verifierMaxTokens: 8192,
-
     evidenceMinItems: 20,
 
     totalFindings: "12-18",
@@ -76,11 +65,6 @@ export const REASONING_LEVELS = {
     synthesizerModel: "claude-sonnet-4-5",
     verifierModel: "claude-sonnet-4-5",
 
-    classifierMaxTokens: 512,
-    researcherMaxTokens: 12288,
-    synthesizerMaxTokens: 16384,
-    verifierMaxTokens: 16384,
-
     evidenceMinItems: 40,
 
     totalFindings: "25-35",
@@ -102,11 +86,6 @@ export const REASONING_LEVELS = {
     researcherModel: "claude-opus-4-6",
     synthesizerModel: "claude-opus-4-6",
     verifierModel: "claude-opus-4-6",
-
-    classifierMaxTokens: 1024,
-    researcherMaxTokens: 16384,
-    synthesizerMaxTokens: 16384,
-    verifierMaxTokens: 16384,
 
     evidenceMinItems: 60,
 

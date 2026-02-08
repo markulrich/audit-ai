@@ -26,6 +26,22 @@ const MODEL_FALLBACKS = [
   "claude-sonnet-4-5"
 ];
 
+// Max output tokens per model family. The API rejects requests that exceed these.
+const MODEL_MAX_OUTPUT_TOKENS = {
+  "claude-haiku": 8192,
+  "claude-sonnet": 16384,
+  "claude-opus": 16384,
+};
+
+/** Return the max output tokens for a given model ID. */
+function getMaxOutputTokens(model) {
+  if (!model) return 8192;
+  for (const [prefix, max] of Object.entries(MODEL_MAX_OUTPUT_TOKENS)) {
+    if (model.startsWith(prefix)) return max;
+  }
+  return 8192; // safe default
+}
+
 function isModelNotFound(err) {
   const status = err?.status;
   const message = `${err?.message || ""} ${err?.error?.error?.message || ""}`.toLowerCase();
@@ -47,7 +63,9 @@ export async function createMessage(params) {
   let lastModelError = null;
   for (const model of candidateModels) {
     try {
-      return await client.messages.create({ ...params, model });
+      // Always use the model's maximum output tokens
+      const max_tokens = getMaxOutputTokens(model);
+      return await client.messages.create({ ...params, model, max_tokens });
     } catch (err) {
       if (isModelNotFound(err)) {
         lastModelError = err;
@@ -72,10 +90,14 @@ export async function tracedCreate(params) {
   const response = await createMessage(params);
   const durationMs = Date.now() - startTime;
 
+  // Resolve the actual max_tokens that was used (set by createMessage based on model)
+  const resolvedModel = response.model || params.model || ANTHROPIC_MODEL;
+  const resolvedMaxTokens = getMaxOutputTokens(resolvedModel);
+
   const trace = {
     request: {
       model: params.model,
-      max_tokens: params.max_tokens,
+      max_tokens: resolvedMaxTokens,
       system: params.system,
       messages: params.messages,
     },

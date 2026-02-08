@@ -40,7 +40,6 @@ const DOMAIN_PROFILES = {
 export async function classifyDomain(query, send, config = {}) {
   const params = {
     ...(config.classifierModel && { model: config.classifierModel }),
-    max_tokens: config.classifierMaxTokens || 512,
     system: `You are a query classifier for DoublyAI, an explainable research platform.
 Given a user query, determine which research domain it belongs to.
 
@@ -70,7 +69,7 @@ Extract the stock ticker if mentioned or inferable. Extract the company name.`,
       trace: {
         request: {
           model: params.model || "(default)",
-          max_tokens: params.max_tokens,
+          max_tokens: "(model max)",
           system: params.system,
           messages: params.messages,
         },

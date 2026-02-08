@@ -49,7 +49,6 @@ export async function verify(query, domainProfile, draft, send, config = {}) {
 
   const params = {
     ...(config.verifierModel && { model: config.verifierModel }),
-    max_tokens: config.verifierMaxTokens || 16384,
     system: `You are an adversarial fact-checker and research quality auditor. Your job is to find problems with every finding in a draft equity research report.
 
 COMPANY: ${companyName} (${ticker})
@@ -159,7 +158,7 @@ Return the complete report JSON. No markdown fences. No commentary.`,
       trace: {
         request: {
           model: params.model || "(default)",
-          max_tokens: params.max_tokens,
+          max_tokens: "(model max)",
           system: params.system,
           messages: params.messages,
         },

@@ -35,7 +35,6 @@ export async function synthesize(query, domainProfile, evidence, send, config = 
 
   const params = {
     ...(config.synthesizerModel && { model: config.synthesizerModel }),
-    max_tokens: config.synthesizerMaxTokens || 16384,
     system: `You are a senior equity research analyst at a top-tier investment bank (Morgan Stanley, JPMorgan, Goldman Sachs caliber).
 
 You are writing an initiating coverage report on ${companyName} (${ticker}).
@@ -148,7 +147,7 @@ Respond with JSON only. No markdown fences. No commentary.`,
       trace: {
         request: {
           model: params.model || "(default)",
-          max_tokens: params.max_tokens,
+          max_tokens: "(model max)",
           system: params.system,
           messages: params.messages,
         },
