@@ -44,6 +44,19 @@ jobs:
           flyctl apps list | grep -q "$PREVIEW_APP" || \
             flyctl apps create "$PREVIEW_APP" --org personal
 
+      - name: Create Tigris storage bucket (if needed)
+        run: |
+          # fly storage create sets BUCKET_NAME, AWS_ENDPOINT_URL_S3, AWS_ACCESS_KEY_ID,
+          # AWS_SECRET_ACCESS_KEY, and AWS_REGION as secrets on the app automatically.
+          if flyctl storage list --app "$PREVIEW_APP" 2>/dev/null | grep -q "$PREVIEW_APP"; then
+            echo "Storage bucket already exists, skipping creation."
+          else
+            flyctl storage create \
+              --app "$PREVIEW_APP" \
+              --name "${PREVIEW_APP}-reports" \
+              --public=false
+          fi
+
       - name: Set secrets on preview app
         run: |
           flyctl secrets set ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
@@ -97,6 +110,11 @@ jobs:
     steps:
       - name: Setup flyctl
         uses: superfly/flyctl-actions/setup-flyctl@fc53c09e1bc3be6f54706524e3b82c4f462f77be # v1.5
+
+      - name: Destroy Tigris storage bucket
+        run: |
+          flyctl storage destroy "${PREVIEW_APP}-reports" --yes 2>/dev/null || \
+            echo "Storage bucket ${PREVIEW_APP}-reports not found, skipping."
 
       - name: Destroy preview app
         run: |
