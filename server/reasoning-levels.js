@@ -18,11 +18,11 @@ export const REASONING_LEVELS = {
     synthesizerModel: undefined,
     verifierModel: undefined,
 
-    // Max tokens
-    classifierMaxTokens: 256,
-    researcherMaxTokens: 4096,
-    synthesizerMaxTokens: 3000,
-    verifierMaxTokens: 3000,
+    // Max tokens — set generous ceilings; prompt constraints control actual length
+    classifierMaxTokens: 1024,
+    researcherMaxTokens: 8192,
+    synthesizerMaxTokens: 8192,
+    verifierMaxTokens: 8192,
 
     // Researcher
     evidenceMinItems: 2,
