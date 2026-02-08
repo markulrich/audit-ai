@@ -69,9 +69,9 @@ YOUR TASK: Given the evidence below, produce a structured JSON report. You MUST 
         "title": "Q4 FY2025 Revenue",
         "text": "This figure comes directly from NVIDIA's official earnings release. Revenue was up 12% sequentially and 78% year-over-year, driven primarily by Data Center segment growth.",
         "supportingEvidence": [
-          { "source": "NVIDIA Newsroom (Official)", "quote": "Revenue for the fourth quarter was $39.3 billion, up 12% from the previous quarter and up 78% from a year ago.", "url": "nvidianews.nvidia.com" },
-          { "source": "NASDAQ", "quote": "NVIDIA Reports Record Q4 Revenue of $39.3 Billion.", "url": "nasdaq.com" },
-          { "source": "SEC Filing", "quote": "Q4 FY2025 GAAP earnings per diluted share was $0.89, up 82% year-over-year.", "url": "sec.gov" }
+          { "source": "NVIDIA Newsroom (Official)", "quote": "Revenue for the fourth quarter was $39.3 billion, up 12% from the previous quarter and up 78% from a year ago, driven primarily by continued strong demand for the company's data center AI platforms across cloud service providers, enterprise customers, and sovereign AI initiatives.", "url": "https://nvidianews.nvidia.com/news/nvidia-announces-financial-results-for-fourth-quarter-fiscal-2025" },
+          { "source": "NASDAQ", "quote": "NVIDIA Reports Record Q4 Revenue of $39.3 Billion. The company's data center revenue alone reached $35.6 billion, reflecting the unprecedented demand for AI infrastructure and GPU computing across all major cloud providers.", "url": "https://www.nasdaq.com/articles/nvidia-nvda-q4-2025-earnings-report" },
+          { "source": "SEC Filing", "quote": "Q4 FY2025 GAAP earnings per diluted share was $0.89, up 82% year-over-year. Total annual revenue reached $130.5 billion, representing a 114% increase over the prior fiscal year, with gross margins expanding to 73.0% on a GAAP basis.", "url": "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=NVDA&type=10-K" }
         ],
         "contraryEvidence": []
       }
@@ -84,7 +84,7 @@ CRITICAL SCHEMA RULES (the frontend WILL BREAK if you deviate):
 - "findings[].text" is the finding sentence. "findings[].explanation.text" is the explanation paragraph. These are DIFFERENT fields.
 - "findings[].section" must match the "sections[].id" it belongs to
 - "sections[].content" is an array that interleaves { "type": "finding", "id": "fN" } refs with { "type": "text", "value": "..." } connectors and { "type": "break" } paragraph separators
-- The "url" field in evidence items should be a domain name (e.g., "nvidianews.nvidia.com", "sec.gov", "seekingalpha.com"), NOT a full URL. For general knowledge use "general". For calculated values use "derived". For multiple non-specific sources use "various".
+- The "url" field in evidence items should be a full, realistic URL pointing to where the information would be found (e.g., "https://nvidianews.nvidia.com/news/nvidia-announces-financial-results-for-fourth-quarter-fiscal-2025", "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=NVDA&type=10-K"). Preserve the full URLs from the evidence provided by the Research Agent. For general knowledge use "general". For calculated values use "derived". For multiple non-specific sources use "various".
 - "meta.rating" must be exactly one of: "Overweight", "Equal-Weight", "Underweight"
 
 RULES FOR FINDINGS:
@@ -92,11 +92,12 @@ RULES FOR FINDINGS:
 2. Findings are sentence fragments that FLOW NATURALLY when woven into the content array. Some may be complete sentences, others may be clauses (e.g., "with a market capitalization of approximately $4.5 trillion") that connect via text nodes
 3. Findings must be based on the evidence provided — do not invent data
 4. Each finding must have at least 3 supporting evidence items from the provided evidence (more is better)
-5. Set contraryEvidence to an empty array [] — the Verification Agent will populate it later
-6. The explanation "title" should be 2-5 words summarizing the claim (e.g., "Q4 Revenue Figure", "Market Share Estimate")
-7. The explanation "text" should be 2-4 sentences providing context, significance, and nuance beyond the finding itself
-8. Produce 25-35 findings total, distributed across all sections
-9. Use sequential IDs: f1, f2, f3, ... f30
+5. Evidence quotes should be SUBSTANTIAL — aim for 2-4 sentences (40-100 words) that provide full context, not just a short fragment. Preserve the detailed quotes from the Research Agent's evidence
+6. Set contraryEvidence to an empty array [] — the Verification Agent will populate it later
+7. The explanation "title" should be 2-5 words summarizing the claim (e.g., "Q4 Revenue Figure", "Market Share Estimate")
+8. The explanation "text" should be 2-4 sentences providing context, significance, and nuance beyond the finding itself
+9. Produce 25-35 findings total, distributed across all sections
+10. Use sequential IDs: f1, f2, f3, ... f30
 
 RULES FOR SECTIONS:
 1. Use these section IDs: investment_thesis, recent_price_action, financial_performance, product_and_technology, competitive_landscape, industry_and_macro, key_risks, analyst_consensus

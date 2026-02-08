@@ -33,8 +33,8 @@ SOURCE HIERARCHY (most to least authoritative):
 
 FOR EACH EVIDENCE ITEM, PROVIDE:
 - source: The publication or data provider name (e.g., "NVIDIA Newsroom (Official)", "Seeking Alpha", "Goldman Sachs")
-- quote: An exact or near-exact quote or data point. Be VERY specific with numbers, dates, and percentages. This will be displayed to the user as the primary evidence.
-- url: The domain name only, NOT a full URL (e.g., "nvidianews.nvidia.com", "sec.gov", "seekingalpha.com"). For general industry knowledge use "general". For data derived from multiple unnamed sources use "various".
+- quote: An exact or near-exact quote or data point. Be VERY specific with numbers, dates, and percentages. This will be displayed to the user as the primary evidence. Quotes should be SUBSTANTIAL — aim for 2-4 sentences (40-100 words) that provide full context, not just a single number or fragment. Include surrounding context that helps the reader understand the significance of the data point.
+- url: A full, realistic URL pointing to where this information would be found (e.g., "https://nvidianews.nvidia.com/news/nvidia-announces-financial-results-for-fourth-quarter-fiscal-2025", "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=NVDA&type=10-K", "https://seekingalpha.com/article/nvidia-earnings-analysis"). Construct plausible, well-formed URLs with paths that reflect the specific content being cited. For general industry knowledge use "general". For data derived from multiple unnamed sources use "various".
 - category: One of [financial_data, market_data, analyst_opinion, product_news, competitive_intel, risk_factor, macro_trend]
 - authority: One of [official_filing, company_announcement, analyst_estimate, industry_report, press_coverage]
 

@@ -114,10 +114,10 @@ This is the most important section of this file. The Report.jsx component reads 
     "title": "Short Title (2-5 words)",
     "text": "2-4 sentences of context and significance",
     "supportingEvidence": [                  // ← INSIDE explanation
-      { "source": "NVIDIA Newsroom (Official)", "quote": "Exact quote or data point", "url": "nvidianews.nvidia.com" }
+      { "source": "NVIDIA Newsroom (Official)", "quote": "Revenue for the fourth quarter was $39.3 billion, up 12% from the previous quarter and up 78% from a year ago, driven primarily by continued strong demand for the company's data center AI platforms.", "url": "https://nvidianews.nvidia.com/news/nvidia-announces-financial-results-for-fourth-quarter-fiscal-2025" }
     ],
     "contraryEvidence": [                    // ← INSIDE explanation (same level as supportingEvidence)
-      { "source": "Source Name", "quote": "Contradicting data or caveat", "url": "domain.com" }
+      { "source": "Source Name", "quote": "Contradicting data or caveat with full context — 2-4 sentences", "url": "https://example.com/full/path/to/article" }
     ]
   }
 }
@@ -138,13 +138,19 @@ This is the most important section of this file. The Report.jsx component reads 
 
 ### URL conventions in evidence items:
 
-- Regular sources: domain name only (e.g., `"sec.gov"`, `"seekingalpha.com"`)
+- Regular sources: full URLs with realistic paths (e.g., `"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=NVDA&type=10-K"`, `"https://seekingalpha.com/article/nvidia-earnings-analysis"`)
 - General knowledge: `"general"`
 - Multiple sources: `"various"`
 - Calculated/derived: `"derived"`
 - Internal methodology: `"internal"`
 
-Report.jsx filters out "general", "various", "derived", and "internal" from displaying the source link.
+Report.jsx filters out "general", "various", "derived", and "internal" from displaying the source link. Full URLs (starting with `http`) are rendered as clickable `<a>` links that open in a new tab, displaying just the hostname.
+
+### Quote conventions in evidence items:
+
+- Quotes should be substantial: 2-4 sentences (40-100 words) providing full context
+- Include surrounding context that helps the reader understand the significance of the data point
+- Avoid short fragments like "Revenue was $39.3B" — instead provide the full context around that figure
 
 ### Content array item types:
 

@@ -141,7 +141,19 @@ function EvidenceSection({ title, items, color }) {
             ev.url !== "derived" &&
             ev.url !== "internal" && (
               <div style={{ fontSize: 10, color: COLORS.textMuted, marginTop: 3 }}>
-                Source: {ev.url}
+                Source:{" "}
+                {ev.url.startsWith("http") ? (
+                  <a
+                    href={ev.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: "#2563eb", textDecoration: "underline" }}
+                  >
+                    {(() => { try { return new URL(ev.url).hostname.replace(/^www\./, ""); } catch { return ev.url; } })()}
+                  </a>
+                ) : (
+                  ev.url
+                )}
               </div>
             )}
         </div>
