@@ -39,14 +39,15 @@ jobs:
       - name: Setup flyctl
         uses: superfly/flyctl-actions/setup-flyctl@fc53c09e1bc3be6f54706524e3b82c4f462f77be # v1.5
 
-      - name: Create preview app and set secrets
+      - name: Create preview app (if needed)
         run: |
-          if ! flyctl apps list | grep -q "$PREVIEW_APP"; then
+          flyctl apps list | grep -q "$PREVIEW_APP" || \
             flyctl apps create "$PREVIEW_APP" --org personal
-            # New preview apps need ANTHROPIC_API_KEY from GitHub repo secrets
-            flyctl secrets set ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
-              --app "$PREVIEW_APP" --detach
-          fi
+
+      - name: Set secrets on preview app
+        run: |
+          flyctl secrets set ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
+            --app "$PREVIEW_APP" --stage
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
