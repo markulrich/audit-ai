@@ -2,11 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Mock the anthropic client before importing the module under test
 vi.mock("../anthropic-client.js", () => ({
-  createMessage: vi.fn(),
+  tracedCreate: vi.fn(),
 }));
 
 import { verify } from "./verifier.js";
-import { createMessage } from "../anthropic-client.js";
+import { tracedCreate } from "../anthropic-client.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -86,17 +86,19 @@ function makeVerifiedReport({ includeMeta = true, metaOverallCertainty = 80 } = 
   return report;
 }
 
-/** Makes createMessage return text as if the AI produced it. */
+/** Makes tracedCreate return text as if the AI produced it. */
 function mockAiResponse(text) {
-  createMessage.mockResolvedValueOnce({
-    content: [{ text }],
+  tracedCreate.mockResolvedValueOnce({
+    response: { content: [{ text }], stop_reason: "end_turn" },
+    trace: {},
   });
 }
 
-/** Makes createMessage return an empty / missing content response. */
+/** Makes tracedCreate return an empty / missing content response. */
 function mockEmptyResponse() {
-  createMessage.mockResolvedValueOnce({
-    content: [],
+  tracedCreate.mockResolvedValueOnce({
+    response: { content: [], stop_reason: "end_turn" },
+    trace: {},
   });
 }
 
@@ -115,7 +117,7 @@ describe("verifier agent", () => {
     const expected = makeVerifiedReport();
     mockAiResponse(JSON.stringify(expected));
 
-    const result = await verify("test query", domainProfile, makeDraft());
+    const { result } = await verify("test query", domainProfile, makeDraft());
     expect(result.findings).toHaveLength(2);
     expect(result.findings[0].certainty).toBe(80);
     expect(result.meta.overallCertainty).toBe(80);
@@ -125,7 +127,7 @@ describe("verifier agent", () => {
     const expected = makeVerifiedReport();
     mockAiResponse("```json\n" + JSON.stringify(expected) + "\n```");
 
-    const result = await verify("test query", domainProfile, makeDraft());
+    const { result } = await verify("test query", domainProfile, makeDraft());
     expect(result.findings).toHaveLength(2);
     expect(result.meta.overallCertainty).toBe(80);
   });
@@ -147,7 +149,7 @@ describe("verifier agent", () => {
       delete badReport.meta;
       mockAiResponse(JSON.stringify(badReport));
 
-      const result = await verify("test query", domainProfile, makeDraft());
+      const { result } = await verify("test query", domainProfile, makeDraft());
 
       // AI's certainty=80 should be preserved, not replaced by default 60
       expect(result.findings[0].certainty).toBe(80);
@@ -162,7 +164,7 @@ describe("verifier agent", () => {
       badReport.meta = null;
       mockAiResponse(JSON.stringify(badReport));
 
-      const result = await verify("test query", domainProfile, makeDraft());
+      const { result } = await verify("test query", domainProfile, makeDraft());
 
       expect(result.findings[0].certainty).toBe(80);
       expect(result.meta).toBeDefined();
@@ -187,7 +189,7 @@ describe("verifier agent", () => {
       const draftWithoutMeta = makeDraft({ includeMeta: false });
       delete draftWithoutMeta.meta;
 
-      const result = await verify("test query", domainProfile, draftWithoutMeta);
+      const { result } = await verify("test query", domainProfile, draftWithoutMeta);
 
       // Should not throw — should return draft with default scores
       expect(result.findings[0].certainty).toBe(60);
@@ -201,7 +203,7 @@ describe("verifier agent", () => {
       const draftWithNullMeta = makeDraft();
       draftWithNullMeta.meta = null;
 
-      const result = await verify("test query", domainProfile, draftWithNullMeta);
+      const { result } = await verify("test query", domainProfile, draftWithNullMeta);
 
       expect(result.findings[0].certainty).toBe(60);
       expect(result.meta).toBeDefined();
@@ -214,7 +216,7 @@ describe("verifier agent", () => {
       const draftWithoutMeta = makeDraft({ includeMeta: false });
       delete draftWithoutMeta.meta;
 
-      const result = await verify("test query", domainProfile, draftWithoutMeta);
+      const { result } = await verify("test query", domainProfile, draftWithoutMeta);
 
       expect(result.findings[0].certainty).toBe(60);
       expect(result.meta).toBeDefined();
@@ -239,7 +241,7 @@ describe("verifier agent", () => {
 
       mockAiResponse(aiResponse);
 
-      const result = await verify("test query", domainProfile, makeDraft());
+      const { result } = await verify("test query", domainProfile, makeDraft());
 
       // Should extract the actual JSON object and preserve certainty=80
       expect(result.findings[0].certainty).toBe(80);
@@ -254,7 +256,7 @@ describe("verifier agent", () => {
 
       mockAiResponse(aiResponse);
 
-      const result = await verify("test query", domainProfile, makeDraft());
+      const { result } = await verify("test query", domainProfile, makeDraft());
 
       expect(result.findings[0].certainty).toBe(80);
     });
@@ -269,7 +271,7 @@ describe("verifier agent", () => {
       report.findings = report.findings.filter((f) => f.id !== "f2");
       mockAiResponse(JSON.stringify(report));
 
-      const result = await verify("test query", domainProfile, makeDraft());
+      const { result } = await verify("test query", domainProfile, makeDraft());
       const contentIds = result.sections[0].content
         .filter((c) => c.type === "finding")
         .map((c) => c.id);
@@ -287,7 +289,7 @@ describe("verifier agent", () => {
       delete report.meta.overallCertainty;
       mockAiResponse(JSON.stringify(report));
 
-      const result = await verify("test query", domainProfile, makeDraft());
+      const { result } = await verify("test query", domainProfile, makeDraft());
       expect(result.meta.overallCertainty).toBe(80); // mean of [80, 80]
     });
   });

@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("../anthropic-client.js", () => ({
-  createMessage: vi.fn(),
+  tracedCreate: vi.fn(),
 }));
 
 import { synthesize } from "./synthesizer.js";
-import { createMessage } from "../anthropic-client.js";
+import { tracedCreate } from "../anthropic-client.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -62,14 +62,17 @@ function makeReport() {
 }
 
 function mockAiResponse(text, stopReason = "end_turn") {
-  createMessage.mockResolvedValueOnce({
-    content: [{ text }],
-    stop_reason: stopReason,
+  tracedCreate.mockResolvedValueOnce({
+    response: { content: [{ text }], stop_reason: stopReason },
+    trace: {},
   });
 }
 
 function mockEmptyResponse() {
-  createMessage.mockResolvedValueOnce({ content: [] });
+  tracedCreate.mockResolvedValueOnce({
+    response: { content: [], stop_reason: "end_turn" },
+    trace: {},
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -85,7 +88,7 @@ describe("synthesizer agent", () => {
     const expected = makeReport();
     mockAiResponse(JSON.stringify(expected));
 
-    const result = await synthesize("test query", domainProfile, evidence);
+    const { result } = await synthesize("test query", domainProfile, evidence);
     expect(result.findings).toHaveLength(1);
     expect(result.meta.title).toBe("Test Corp (TEST)");
   });
@@ -94,7 +97,7 @@ describe("synthesizer agent", () => {
     const expected = makeReport();
     mockAiResponse("```json\n" + JSON.stringify(expected) + "\n```");
 
-    const result = await synthesize("test query", domainProfile, evidence);
+    const { result } = await synthesize("test query", domainProfile, evidence);
     expect(result.findings).toHaveLength(1);
   });
 
@@ -118,7 +121,7 @@ describe("synthesizer agent", () => {
 
       mockAiResponse(aiResponse);
 
-      const result = await synthesize("test query", domainProfile, evidence);
+      const { result } = await synthesize("test query", domainProfile, evidence);
       // Should extract the actual JSON, not fall through to error
       expect(result.meta.title).toBe("Test Corp (TEST)");
       expect(result.findings).toHaveLength(1);
@@ -128,7 +131,7 @@ describe("synthesizer agent", () => {
       const report = makeReport();
       mockAiResponse("Here is the report:\n" + JSON.stringify(report));
 
-      const result = await synthesize("test query", domainProfile, evidence);
+      const { result } = await synthesize("test query", domainProfile, evidence);
       expect(result.findings).toHaveLength(1);
     });
   });
@@ -143,7 +146,7 @@ describe("synthesizer agent", () => {
       mockAiResponse(truncated, "max_tokens");
 
       // Should repair by closing the open brace, bracket, and outer brace
-      const result = await synthesize("test query", domainProfile, evidence);
+      const { result } = await synthesize("test query", domainProfile, evidence);
       expect(result.meta).toBeDefined();
       expect(result.meta.title).toBe("Test Corp (TEST)");
     });
@@ -153,7 +156,7 @@ describe("synthesizer agent", () => {
       mockAiResponse('{"meta": {"tit', "max_tokens");
 
       // Repair closes the braces: {"meta": {}} — valid JSON
-      const result = await synthesize("test query", domainProfile, evidence);
+      const { result } = await synthesize("test query", domainProfile, evidence);
       expect(result.meta).toBeDefined();
     });
   });
