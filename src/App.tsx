@@ -3,6 +3,7 @@ import type { Report, ProgressEvent, TraceEvent, ErrorInfo, ErrorDetail } from "
 import QueryInput from "./components/QueryInput";
 import ProgressStream from "./components/ProgressStream";
 import Report_ from "./components/Report";
+import ReportsPage from "./components/ReportsPage";
 
 function isReportPayload(value: unknown): value is Report {
   return (
@@ -53,9 +54,13 @@ function getPublishedSlug() {
   return match ? match[1] : null;
 }
 
+function isReportsListRoute() {
+  return window.location.pathname === "/reports" || window.location.pathname === "/reports/";
+}
+
 export default function App() {
-  const [state, setState] = useState<"idle" | "loading" | "loading-published" | "done" | "error">(
-    () => getPublishedSlug() ? "loading-published" : "idle"
+  const [state, setState] = useState<"idle" | "loading" | "loading-published" | "done" | "error" | "reports-list">(
+    () => isReportsListRoute() ? "reports-list" : getPublishedSlug() ? "loading-published" : "idle"
   );
   const [progress, setProgress] = useState<ProgressEvent[]>([]);
   const [report, setReport] = useState<Report | null>(null);
@@ -253,14 +258,18 @@ export default function App() {
     setError(null);
     setTraceData([]);
     setPublishedSlug(null);
-    // Clear /reports/:slug from URL if present
-    if (window.location.pathname.startsWith("/reports/")) {
+    // Clear /reports* from URL if present
+    if (window.location.pathname.startsWith("/reports")) {
       window.history.pushState(null, "", "/");
     }
   };
 
   if (state === "done" && report) {
     return <Report_ data={report} traceData={traceData} onBack={handleReset} publishedSlug={publishedSlug} />;
+  }
+
+  if (state === "reports-list") {
+    return <ReportsPage onBack={handleReset} />;
   }
 
   if (state === "loading-published") {

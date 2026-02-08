@@ -13,8 +13,8 @@
  * and AWS_REGION as secrets on the app — no manual config needed.
  */
 
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
-import { readFile, writeFile, mkdir } from "fs/promises";
+import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
+import { readFile, writeFile, mkdir, readdir } from "fs/promises";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import type { Report } from "../shared/types";
@@ -182,4 +182,48 @@ export async function getReport(
     createdAt: meta.createdAt,
     ...data,
   };
+}
+
+export async function listReports(): Promise<SlugMeta[]> {
+  const slugs: string[] = [];
+
+  if (useS3) {
+    let continuationToken: string | undefined;
+    do {
+      const resp = await s3!.send(
+        new ListObjectsV2Command({
+          Bucket: BUCKET,
+          Prefix: "reports/",
+          Delimiter: "/",
+          ContinuationToken: continuationToken,
+        })
+      );
+      for (const prefix of resp.CommonPrefixes || []) {
+        // prefix.Prefix is e.g. "reports/my-slug/"
+        const slug = prefix.Prefix?.replace(/^reports\//, "").replace(/\/$/, "");
+        if (slug) slugs.push(slug);
+      }
+      continuationToken = resp.NextContinuationToken;
+    } while (continuationToken);
+  } else {
+    try {
+      const entries = await readdir(LOCAL_DATA_DIR, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) slugs.push(entry.name);
+      }
+    } catch (thrown: unknown) {
+      if ((thrown as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw thrown;
+    }
+  }
+
+  const metas: SlugMeta[] = [];
+  for (const slug of slugs) {
+    const meta = await getObject<SlugMeta>(`reports/${slug}/meta.json`);
+    if (meta) metas.push(meta);
+  }
+
+  // Sort by most recently updated first
+  metas.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  return metas;
 }

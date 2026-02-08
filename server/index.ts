@@ -12,7 +12,7 @@ import type { Request, Response, NextFunction } from "express";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { runPipeline } from "./pipeline";
-import { publishReport, getReport } from "./storage";
+import { publishReport, getReport, listReports } from "./storage";
 
 import "./anthropic-client";
 
@@ -190,6 +190,16 @@ app.post("/api/reports/publish", async (req: Request, res: Response) => {
     const err = thrown instanceof Error ? thrown : new Error(String(thrown));
     console.error("Publish error:", err);
     res.status(500).json({ error: err.message || "Failed to publish report" });
+  }
+});
+
+app.get("/api/reports", async (_req: Request, res: Response) => {
+  try {
+    const reports = await listReports();
+    res.json({ reports });
+  } catch (err: unknown) {
+    console.error("List reports error:", err);
+    res.status(500).json({ error: "Failed to list reports" });
   }
 });
 
