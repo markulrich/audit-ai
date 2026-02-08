@@ -45,6 +45,7 @@ export async function verify(query, domainProfile, draft, send, config = {}) {
   const { ticker, companyName } = domainProfile;
   const methodologyLength = config.methodologyLength || "3-5 sentences";
   const methodologySources = config.methodologySources || "3-4";
+  const removalThreshold = config.removalThreshold ?? 25;
 
   const params = {
     ...(config.verifierModel && { model: config.verifierModel }),
@@ -77,7 +78,7 @@ FOR EACH FINDING, YOU MUST:
 
    25-49%: WEAK — Limited sourcing, speculative, or contradicted by stronger evidence.
 
-   <25%:   REMOVE — Finding is unverifiable or likely incorrect. Remove it entirely.
+   <${removalThreshold}%:   REMOVE — Finding is unverifiable or likely incorrect. Remove it entirely.${removalThreshold === 0 ? " (Currently disabled — keep ALL findings regardless of certainty score.)" : ""}
 
 5. For each finding, populate the contraryEvidence array INSIDE the explanation object. Even strong findings should have at least one nuance, caveat, or alternative interpretation. Only truly factual findings from audited filings (95%+) may have an empty contraryEvidence array.
 
@@ -118,7 +119,7 @@ FIELD PLACEMENT IS CRITICAL:
 
 ALSO:
 - Add "overallCertainty" to meta (arithmetic mean of all remaining finding certainty scores, rounded to integer)
-- REMOVE any finding with certainty < 25% from both the findings array AND the section content arrays
+- ${removalThreshold > 0 ? `REMOVE any finding with certainty < ${removalThreshold}% from both the findings array AND the section content arrays` : "Do NOT remove any findings — keep all findings in the report regardless of certainty score"}
 - You may also improve the explanation "text" field to add additional context, correct inaccuracies, or note important caveats
 - Do NOT change the meta, sections structure, or content arrays (except to remove deleted finding refs)
 

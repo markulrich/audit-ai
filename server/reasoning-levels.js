@@ -37,6 +37,7 @@ export const REASONING_LEVELS = {
     // Verifier
     methodologyLength: "1 sentence",
     methodologySources: "1",
+    removalThreshold: 0, // keep all findings regardless of certainty
   },
 
   light: {
@@ -63,6 +64,7 @@ export const REASONING_LEVELS = {
 
     methodologyLength: "2-3 sentences",
     methodologySources: "2-3",
+    removalThreshold: 25,
   },
 
   heavy: {
@@ -89,6 +91,7 @@ export const REASONING_LEVELS = {
 
     methodologyLength: "3-5 sentences",
     methodologySources: "3-4",
+    removalThreshold: 25,
   },
 
   "x-heavy": {
@@ -115,6 +118,7 @@ export const REASONING_LEVELS = {
 
     methodologyLength: "5-8 sentences",
     methodologySources: "4-6",
+    removalThreshold: 25,
   },
 };
 
