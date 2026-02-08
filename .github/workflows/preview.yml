@@ -20,6 +20,19 @@ jobs:
       pull-requests: write
 
     steps:
+      - name: Validate required secrets
+        run: |
+          missing=""
+          if [ -z "$FLY_API_TOKEN" ]; then missing="$missing FLY_API_TOKEN"; fi
+          if [ -z "$ANTHROPIC_API_KEY" ]; then missing="$missing ANTHROPIC_API_KEY"; fi
+          if [ -n "$missing" ]; then
+            echo "::error::Missing required repo secrets:$missing"
+            echo "Add them at: Settings → Secrets and variables → Actions"
+            exit 1
+          fi
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
       - name: Checkout
         uses: actions/checkout@v4
 
