@@ -45,6 +45,7 @@ export async function verify(query, domainProfile, draft, send) {
   const { ticker, companyName } = domainProfile;
 
   const params = {
+    model: "claude-sonnet-4-5",
     max_tokens: 16384,
     system: `You are an adversarial fact-checker and research quality auditor. Your job is to find problems with every finding in a draft equity research report.
 
