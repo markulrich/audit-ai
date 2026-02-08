@@ -143,12 +143,25 @@ function MiniCodeBlock({ content, maxHeight }) {
 
 // ─── Single stage card ──────────────────────────────────────────────────────
 
-function StageCard({ config, activeData, doneData, traceEvent, isActive, isDone, isPending }) {
+function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent, isActive, isDone, isPending }) {
   const [expanded, setExpanded] = useState(false);
   const [drillTab, setDrillTab] = useState("overview");
   const elapsedSec = useElapsed(isActive);
   const data = doneData || activeData;
   const stats = data?.stats;
+  const prevPendingRef = useRef(null);
+
+  // Use completed trace if available, otherwise use pending (pre-call) trace
+  const activeTrace = traceEvent || pendingTraceEvent;
+
+  // Auto-expand when pre-call trace arrives (LLM call starts)
+  useEffect(() => {
+    if (pendingTraceEvent && !prevPendingRef.current && isActive) {
+      setExpanded(true);
+      setDrillTab("system");
+    }
+    prevPendingRef.current = pendingTraceEvent;
+  }, [pendingTraceEvent, isActive]);
 
   return (
     <div
@@ -547,8 +560,8 @@ function StageCard({ config, activeData, doneData, traceEvent, isActive, isDone,
             </div>
           )}
 
-          {/* Trace drill-down (only when trace data is available) */}
-          {traceEvent && (
+          {/* Trace drill-down (available as soon as pre-call trace arrives) */}
+          {activeTrace && (
             <div>
               <div
                 style={{
@@ -558,32 +571,51 @@ function StageCard({ config, activeData, doneData, traceEvent, isActive, isDone,
                   letterSpacing: 0.8,
                   color: COLORS.textMuted,
                   marginBottom: 4,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
                 }}
               >
                 LLM Call Details
+                {!traceEvent && (
+                  <span
+                    style={{
+                      fontSize: 8,
+                      fontWeight: 600,
+                      color: config.color,
+                      background: config.color + "15",
+                      padding: "1px 6px",
+                      borderRadius: 3,
+                      animation: "pulse 1.5s ease-in-out infinite",
+                    }}
+                  >
+                    awaiting response...
+                  </span>
+                )}
               </div>
               <div style={{ display: "flex", gap: 0, borderBottom: `1px solid ${COLORS.border}`, marginBottom: 6 }}>
                 {[
                   { id: "overview", label: "Overview" },
                   { id: "system", label: "System Prompt" },
                   { id: "user", label: "User Msg" },
-                  { id: "raw", label: "Raw Output" },
+                  { id: "raw", label: "Raw Output", disabled: !traceEvent },
                 ].map((tab) => (
                   <button
                     key={tab.id}
-                    onClick={(e) => { e.stopPropagation(); setDrillTab(tab.id); }}
+                    onClick={(e) => { e.stopPropagation(); if (!tab.disabled) setDrillTab(tab.id); }}
                     style={{
                       padding: "4px 8px",
                       fontSize: 9,
                       fontWeight: drillTab === tab.id ? 700 : 500,
-                      color: drillTab === tab.id ? COLORS.accent : COLORS.textMuted,
+                      color: tab.disabled ? COLORS.border : drillTab === tab.id ? COLORS.accent : COLORS.textMuted,
                       background: drillTab === tab.id ? COLORS.panelBg : "transparent",
                       border: "none",
                       borderBottom: drillTab === tab.id ? `2px solid ${config.color}` : "2px solid transparent",
-                      cursor: "pointer",
+                      cursor: tab.disabled ? "default" : "pointer",
                       fontFamily: "inherit",
                       textTransform: "uppercase",
                       letterSpacing: 0.3,
+                      opacity: tab.disabled ? 0.4 : 1,
                     }}
                   >
                     {tab.label}
@@ -593,27 +625,39 @@ function StageCard({ config, activeData, doneData, traceEvent, isActive, isDone,
 
               {drillTab === "overview" && (
                 <div style={{ fontSize: 10, color: COLORS.textSecondary }}>
-                  <div>Model: <b>{traceEvent.trace?.request?.model || "default"}</b></div>
-                  <div>Max tokens: <b>{traceEvent.trace?.request?.max_tokens?.toLocaleString()}</b></div>
-                  <div>Stop reason: <b>{traceEvent.trace?.response?.stop_reason || "?"}</b></div>
-                  <div>
-                    Tokens: <b>{traceEvent.trace?.response?.usage?.input_tokens?.toLocaleString()}</b> in
-                    / <b>{traceEvent.trace?.response?.usage?.output_tokens?.toLocaleString()}</b> out
-                  </div>
-                  <div>Duration: <b>{((traceEvent.trace?.timing?.durationMs || 0) / 1000).toFixed(1)}s</b></div>
+                  <div>Model: <b>{activeTrace.trace?.request?.model || "default"}</b></div>
+                  <div>Max tokens: <b>{activeTrace.trace?.request?.max_tokens?.toLocaleString()}</b></div>
+                  {traceEvent ? (
+                    <>
+                      <div>Stop reason: <b>{traceEvent.trace?.response?.stop_reason || "?"}</b></div>
+                      <div>
+                        Tokens: <b>{traceEvent.trace?.response?.usage?.input_tokens?.toLocaleString()}</b> in
+                        / <b>{traceEvent.trace?.response?.usage?.output_tokens?.toLocaleString()}</b> out
+                      </div>
+                      <div>Duration: <b>{((traceEvent.trace?.timing?.durationMs || 0) / 1000).toFixed(1)}s</b></div>
+                    </>
+                  ) : (
+                    <div style={{ color: config.color, fontStyle: "italic", marginTop: 4 }}>
+                      Waiting for LLM response...
+                    </div>
+                  )}
                 </div>
               )}
               {drillTab === "system" && (
-                <MiniCodeBlock content={traceEvent.trace?.request?.system || "N/A"} maxHeight={250} />
+                <MiniCodeBlock content={activeTrace.trace?.request?.system || "N/A"} maxHeight={250} />
               )}
               {drillTab === "user" && (
                 <MiniCodeBlock
-                  content={traceEvent.trace?.request?.messages?.[0]?.content || "N/A"}
+                  content={activeTrace.trace?.request?.messages?.[0]?.content || "N/A"}
                   maxHeight={250}
                 />
               )}
               {drillTab === "raw" && (
-                <MiniCodeBlock content={traceEvent.trace?.response?.raw || "N/A"} maxHeight={250} />
+                traceEvent
+                  ? <MiniCodeBlock content={traceEvent.trace?.response?.raw || "N/A"} maxHeight={250} />
+                  : <div style={{ fontSize: 10, color: config.color, fontStyle: "italic", padding: "10px 0" }}>
+                      Response not yet available — LLM call in progress...
+                    </div>
               )}
             </div>
           )}
@@ -633,10 +677,18 @@ export default function ProgressStream({ steps, traceData }) {
   const stageMap = {};
   steps.forEach((s) => { stageMap[s.stage] = s; });
 
+  // Separate completed traces from pending (pre-call) traces
   const traceMap = {};
-  (traceData || []).forEach((t) => { traceMap[t.stage] = t; });
+  const pendingTraceMap = {};
+  (traceData || []).forEach((t) => {
+    if (t.status === "pending") {
+      pendingTraceMap[t.stage] = t;
+    } else {
+      traceMap[t.stage] = t;
+    }
+  });
 
-  // Map trace stage names to STAGE_CONFIG keys
+  // Map STAGE_CONFIG keys to trace stage names
   const traceKeyMap = {
     classifying: "classifier",
     researching: "researcher",
@@ -682,7 +734,9 @@ export default function ProgressStream({ steps, traceData }) {
           const isDone = !!stageMap[config.doneKey];
           const isActive = !!stageMap[config.key] && !isDone;
           const isPending = !stageMap[config.key];
-          const traceEvent = traceMap[traceKeyMap[config.key]];
+          const traceStage = traceKeyMap[config.key];
+          const traceEvent = traceMap[traceStage];
+          const pendingTraceEvent = pendingTraceMap[traceStage];
 
           return (
             <StageCard
@@ -691,6 +745,7 @@ export default function ProgressStream({ steps, traceData }) {
               activeData={stageMap[config.key]}
               doneData={stageMap[config.doneKey]}
               traceEvent={traceEvent}
+              pendingTraceEvent={pendingTraceEvent}
               isActive={isActive}
               isDone={isDone}
               isPending={isPending}

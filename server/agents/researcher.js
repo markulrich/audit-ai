@@ -8,7 +8,7 @@ import { tracedCreate } from "../anthropic-client.js";
  *
  * V1: Uses Claude's training knowledge. Future: add Brave/SerpAPI for live search.
  */
-export async function research(query, domainProfile) {
+export async function research(query, domainProfile, send) {
   const { ticker, companyName, focusAreas } = domainProfile;
 
   const params = {
@@ -65,6 +65,23 @@ Respond with a JSON array of evidence items. JSON only, no markdown.`,
       },
     ],
   };
+
+  // Emit pre-call trace so frontend can show request details while LLM is working
+  if (send) {
+    send("trace", {
+      stage: "researcher",
+      agent: "Researcher",
+      status: "pending",
+      trace: {
+        request: {
+          model: params.model || "(default)",
+          max_tokens: params.max_tokens,
+          system: params.system,
+          messages: params.messages,
+        },
+      },
+    });
+  }
 
   const { response, trace } = await tracedCreate(params);
 

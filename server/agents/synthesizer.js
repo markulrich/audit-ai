@@ -8,7 +8,7 @@ import { tracedCreate } from "../anthropic-client.js";
  *   - Sections with content flow (interleaved findings and connecting text)
  *   - Findings with initial explanations and supporting evidence
  */
-export async function synthesize(query, domainProfile, evidence) {
+export async function synthesize(query, domainProfile, evidence, send) {
   const { ticker, companyName } = domainProfile;
 
   const params = {
@@ -120,6 +120,23 @@ Respond with JSON only. No markdown fences. No commentary.`,
       },
     ],
   };
+
+  // Emit pre-call trace so frontend can show request details while LLM is working
+  if (send) {
+    send("trace", {
+      stage: "synthesizer",
+      agent: "Synthesizer",
+      status: "pending",
+      trace: {
+        request: {
+          model: params.model || "(default)",
+          max_tokens: params.max_tokens,
+          system: params.system,
+          messages: params.messages,
+        },
+      },
+    });
+  }
 
   const { response, trace } = await tracedCreate(params);
 

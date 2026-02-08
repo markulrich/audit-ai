@@ -34,7 +34,7 @@ export async function runPipeline(query, send, isAborted = () => false) {
   });
 
   const { result: domainProfile, trace: classifierTrace } =
-    await classifyDomain(query);
+    await classifyDomain(query, send);
   if (isAborted()) return;
 
   send("progress", {
@@ -76,7 +76,8 @@ export async function runPipeline(query, send, isAborted = () => false) {
 
   const { result: evidence, trace: researcherTrace } = await research(
     query,
-    domainProfile
+    domainProfile,
+    send
   );
   if (isAborted()) return;
 
@@ -137,7 +138,8 @@ export async function runPipeline(query, send, isAborted = () => false) {
   const { result: draft, trace: synthesizerTrace } = await synthesize(
     query,
     domainProfile,
-    evidence
+    evidence,
+    send
   );
   if (isAborted()) return;
 
@@ -190,7 +192,8 @@ export async function runPipeline(query, send, isAborted = () => false) {
   const { result: report, trace: verifierTrace } = await verify(
     query,
     domainProfile,
-    draft
+    draft,
+    send
   );
   if (isAborted()) return;
 

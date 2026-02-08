@@ -41,7 +41,7 @@ function cleanOrphanedRefs(report) {
  *
  * THIS AGENT'S JOB IS TO LOWER CERTAINTY, NOT RAISE IT.
  */
-export async function verify(query, domainProfile, draft) {
+export async function verify(query, domainProfile, draft, send) {
   const { ticker, companyName } = domainProfile;
 
   const params = {
@@ -145,6 +145,23 @@ Return the complete report JSON. No markdown fences. No commentary.`,
       },
     ],
   };
+
+  // Emit pre-call trace so frontend can show request details while LLM is working
+  if (send) {
+    send("trace", {
+      stage: "verifier",
+      agent: "Verifier",
+      status: "pending",
+      trace: {
+        request: {
+          model: params.model || "(default)",
+          max_tokens: params.max_tokens,
+          system: params.system,
+          messages: params.messages,
+        },
+      },
+    });
+  }
 
   const { response, trace } = await tracedCreate(params);
 

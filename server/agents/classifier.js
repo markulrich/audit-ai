@@ -37,7 +37,7 @@ const DOMAIN_PROFILES = {
  * Classifies the user query into a domain and returns the appropriate profile.
  * For V1, we only support equity_research but the architecture supports expansion.
  */
-export async function classifyDomain(query) {
+export async function classifyDomain(query, send) {
   const params = {
     max_tokens: 512,
     system: `You are a query classifier for DoublyAI, an explainable research platform.
@@ -59,6 +59,23 @@ If the query doesn't match any supported domain, still use "equity_research" as 
 Extract the stock ticker if mentioned or inferable. Extract the company name.`,
     messages: [{ role: "user", content: `<user_query>\n${query}\n</user_query>` }],
   };
+
+  // Emit pre-call trace so frontend can show request details while LLM is working
+  if (send) {
+    send("trace", {
+      stage: "classifier",
+      agent: "Classifier",
+      status: "pending",
+      trace: {
+        request: {
+          model: params.model || "(default)",
+          max_tokens: params.max_tokens,
+          system: params.system,
+          messages: params.messages,
+        },
+      },
+    });
+  }
 
   const { response, trace } = await tracedCreate(params);
 
