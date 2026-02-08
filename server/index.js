@@ -154,8 +154,10 @@ app.post("/api/generate", rateLimit, async (req, res) => {
     if (!aborted) {
       // Sanitize error message — never leak internals
       const safeMessage =
-        err.status === 401 || err.status === 403
-          ? "API authentication failed. Check your ANTHROPIC_API_KEY."
+        err.keyMissing
+          ? "ANTHROPIC_API_KEY is not set. Configure it on the server to enable report generation."
+          : err.status === 401 || err.status === 403
+          ? "ANTHROPIC_API_KEY is set but was rejected by the API. Check that it is valid."
           : err.status === 429
           ? "API rate limit hit. Please wait a minute and try again."
           : err.status >= 500

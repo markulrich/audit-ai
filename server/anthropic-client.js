@@ -43,7 +43,10 @@ function isModelNotFound(err) {
 
 export async function createMessage(params) {
   if (!client) {
-    throw Object.assign(new Error("ANTHROPIC_API_KEY is not configured."), { status: 401 });
+    const err = new Error("ANTHROPIC_API_KEY is not configured.");
+    err.status = 401;
+    err.keyMissing = true;
+    throw err;
   }
   const requestedModel = params.model;
   const candidateModels = [
