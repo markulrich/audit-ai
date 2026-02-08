@@ -1,5 +1,12 @@
 const LEVELS = [
   {
+    key: "xlight",
+    label: "X-Light",
+    model: "Haiku",
+    description: "Fastest possible",
+    color: "#06b6d4",
+  },
+  {
     key: "light",
     label: "Light",
     model: "Haiku",

@@ -4,12 +4,45 @@
  * Each level configures the model and all quantitative parameters
  * sent to the LLM across every agent in the pipeline.
  *
- * Light  → Haiku   — Fast, cheaper, less thorough
- * Medium → Sonnet  — Balanced (current default behavior)
- * Heavy  → Opus    — Most thorough, slowest, most expensive
+ * X-Light → Haiku   — Fastest possible, speed over depth
+ * Light   → Haiku   — Fast, cheaper, less thorough
+ * Medium  → Sonnet  — Balanced (current default behavior)
+ * Heavy   → Opus    — Most thorough, slowest, most expensive
  */
 
 export const REASONING_LEVELS = {
+  xlight: {
+    label: "X-Light",
+    description: "Fastest possible — speed over depth",
+    model: "claude-haiku-4-5",
+
+    classifier: {
+      maxTokens: 256,
+    },
+
+    researcher: {
+      maxTokens: 4096,
+      evidenceTarget: 10,
+      evidencePrompt: "AROUND 10",
+    },
+
+    synthesizer: {
+      maxTokens: 4096,
+      findingsTotal: "8-12",
+      findingsPerSection: "1-2",
+      supportingEvidenceMin: 1,
+      explanationTitleLength: "2-3 words",
+      explanationTextLength: "1 sentence",
+      keyStatsCount: 6,
+    },
+
+    verifier: {
+      maxTokens: 4096,
+      methodologyTextLength: "1-2 sentences",
+      certaintyCutoff: 25,
+    },
+  },
+
   light: {
     label: "Light",
     description: "Fast analysis with fewer details",

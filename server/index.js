@@ -92,7 +92,7 @@ app.post("/api/generate", rateLimit, async (req, res) => {
   const { query, reasoningLevel } = req.body;
 
   // Validate reasoning level
-  const validLevels = ["light", "medium", "heavy"];
+  const validLevels = ["xlight", "light", "medium", "heavy"];
   const level = validLevels.includes(reasoningLevel) ? reasoningLevel : "medium";
 
   // Input validation
