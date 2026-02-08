@@ -20,23 +20,23 @@ export const REASONING_LEVELS = {
 
     // Max tokens
     classifierMaxTokens: 256,
-    researcherMaxTokens: 4096,
-    synthesizerMaxTokens: 4096,
-    verifierMaxTokens: 4096,
+    researcherMaxTokens: 2048,
+    synthesizerMaxTokens: 3000,
+    verifierMaxTokens: 3000,
 
     // Researcher
-    evidenceMinItems: 10,
+    evidenceMinItems: 5,
 
     // Synthesizer
-    totalFindings: "5-8",
-    findingsPerSection: "1-2",
+    totalFindings: "3-5",
+    findingsPerSection: "1",
     supportingEvidenceMin: 1,
     explanationLength: "1 sentence",
-    keyStatsCount: 3,
+    keyStatsCount: 2,
 
     // Verifier
-    methodologyLength: "1-2 sentences",
-    methodologySources: "1-2",
+    methodologyLength: "1 sentence",
+    methodologySources: "1",
   },
 
   light: {
