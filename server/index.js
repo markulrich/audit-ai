@@ -11,6 +11,15 @@ import express from "express";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { runPipeline } from "./pipeline.js";
+import { testConnection, closePool } from "./db/connection.js";
+import { runMigrations } from "./db/migrate.js";
+import {
+  createConversation,
+  updateConversation,
+  listReports,
+  getReport,
+  deleteReport,
+} from "./db/storage.js";
 
 import "./anthropic-client.js";
 
@@ -19,6 +28,9 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 const MAX_QUERY_LENGTH = 5000;
+
+// Track whether database is available (set during startup)
+let dbAvailable = false;
 
 // ── Middleware ───────────────────────────────────────────────────────────────
 
@@ -99,6 +111,18 @@ app.post("/api/generate", rateLimit, async (req, res) => {
     return res.status(400).json({ error: `Query too long (max ${MAX_QUERY_LENGTH} chars)` });
   }
 
+  // Create conversation record if DB is available
+  let conversationId = null;
+  if (dbAvailable) {
+    try {
+      const conv = await createConversation({ query: query.trim() });
+      conversationId = conv?.id || null;
+    } catch (err) {
+      console.error("[DB] Failed to create conversation:", err.message);
+      // Continue without persistence — don't block report generation
+    }
+  }
+
   // Set up SSE
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
@@ -132,10 +156,19 @@ app.post("/api/generate", rateLimit, async (req, res) => {
   }, 15_000);
 
   try {
-    await runPipeline(query.trim(), send, () => aborted);
+    await runPipeline(query.trim(), send, () => aborted, conversationId);
     if (!aborted) send("done", { success: true });
   } catch (err) {
     console.error("Pipeline error:", err);
+
+    // Mark conversation as failed
+    if (conversationId) {
+      updateConversation(conversationId, {
+        status: "failed",
+        errorMessage: err.message,
+      }).catch((e) => console.error("[DB] Failed to update conversation:", e.message));
+    }
+
     if (!aborted) {
       // Sanitize error message — never leak internals
       const safeMessage =
@@ -156,6 +189,77 @@ app.post("/api/generate", rateLimit, async (req, res) => {
   }
 });
 
+// ── Report history API ──────────────────────────────────────────────────────
+
+app.get("/api/reports", async (req, res) => {
+  if (!dbAvailable) {
+    return res.json({ reports: [], total: 0 });
+  }
+
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100);
+    const offset = Math.max(parseInt(req.query.offset) || 0, 0);
+    const result = await listReports({ limit, offset });
+    res.json(result);
+  } catch (err) {
+    console.error("[API] Failed to list reports:", err.message);
+    res.status(500).json({ error: "Failed to retrieve reports" });
+  }
+});
+
+app.get("/api/reports/:id", async (req, res) => {
+  if (!dbAvailable) {
+    return res.status(404).json({ error: "Report not found" });
+  }
+
+  // Validate UUID format
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!uuidRegex.test(req.params.id)) {
+    return res.status(400).json({ error: "Invalid report ID" });
+  }
+
+  try {
+    const report = await getReport(req.params.id);
+    if (!report) {
+      return res.status(404).json({ error: "Report not found" });
+    }
+    res.json(report);
+  } catch (err) {
+    console.error("[API] Failed to get report:", err.message);
+    res.status(500).json({ error: "Failed to retrieve report" });
+  }
+});
+
+app.delete("/api/reports/:id", async (req, res) => {
+  if (!dbAvailable) {
+    return res.status(404).json({ error: "Report not found" });
+  }
+
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!uuidRegex.test(req.params.id)) {
+    return res.status(400).json({ error: "Invalid report ID" });
+  }
+
+  try {
+    const deleted = await deleteReport(req.params.id);
+    if (!deleted) {
+      return res.status(404).json({ error: "Report not found" });
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error("[API] Failed to delete report:", err.message);
+    res.status(500).json({ error: "Failed to delete report" });
+  }
+});
+
+// Health check endpoint
+app.get("/api/health", async (req, res) => {
+  res.json({
+    status: "ok",
+    database: dbAvailable ? "connected" : "unavailable",
+  });
+});
+
 // SPA fallback for production
 if (process.env.NODE_ENV === "production") {
   app.get("*", (req, res) => {
@@ -163,9 +267,41 @@ if (process.env.NODE_ENV === "production") {
   });
 }
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`DoublyAI server running on http://0.0.0.0:${PORT}`);
-}).on("error", (err) => {
-  console.error("LISTEN ERROR:", err.message, err.code);
-  process.exit(1);
+// ── Startup ─────────────────────────────────────────────────────────────────
+
+async function start() {
+  // Initialize database (non-blocking — app works without it)
+  if (process.env.DATABASE_URL) {
+    try {
+      const connected = await testConnection();
+      if (connected) {
+        await runMigrations();
+        dbAvailable = true;
+        console.log("[DB] PostgreSQL connected and migrations applied");
+      } else {
+        console.warn("[DB] Could not connect to PostgreSQL — running without persistence");
+      }
+    } catch (err) {
+      console.warn("[DB] Database initialization failed:", err.message);
+      console.warn("[DB] Running without persistence");
+    }
+  } else {
+    console.log("[DB] DATABASE_URL not set — running without persistence");
+  }
+
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`DoublyAI server running on http://0.0.0.0:${PORT}`);
+  }).on("error", (err) => {
+    console.error("LISTEN ERROR:", err.message, err.code);
+    process.exit(1);
+  });
+}
+
+// Graceful shutdown
+process.on("SIGTERM", async () => {
+  console.log("[SHUTDOWN] SIGTERM received, closing pool...");
+  await closePool();
+  process.exit(0);
 });
+
+start();

@@ -2,6 +2,7 @@ import { classifyDomain } from "./agents/classifier.js";
 import { research } from "./agents/researcher.js";
 import { synthesize } from "./agents/synthesizer.js";
 import { verify } from "./agents/verifier.js";
+import { saveArtifact, updateConversation, saveReport } from "./db/storage.js";
 
 /**
  * Runs the full DoublyAI pipeline with SSE progress updates.
@@ -15,8 +16,9 @@ import { verify } from "./agents/verifier.js";
  * @param {string} query - The user's research query
  * @param {Function} send - SSE event sender: send(eventName, data)
  * @param {Function} isAborted - Returns true if the client disconnected
+ * @param {string|null} conversationId - Database conversation ID (null if DB disabled)
  */
-export async function runPipeline(query, send, isAborted = () => false) {
+export async function runPipeline(query, send, isAborted = () => false, conversationId = null) {
   // ── Stage 1: Classify ───────────────────────────────────────────────────────
   send("progress", {
     stage: "classifying",
@@ -26,6 +28,16 @@ export async function runPipeline(query, send, isAborted = () => false) {
 
   const domainProfile = await classifyDomain(query);
   if (isAborted()) return;
+
+  // Persist classification
+  if (conversationId) {
+    await updateConversation(conversationId, {
+      domain: domainProfile.domain,
+      ticker: domainProfile.ticker,
+      companyName: domainProfile.companyName,
+    });
+    await saveArtifact(conversationId, "classified", domainProfile);
+  }
 
   send("progress", {
     stage: "classified",
@@ -44,6 +56,10 @@ export async function runPipeline(query, send, isAborted = () => false) {
   const evidence = await research(query, domainProfile);
   if (isAborted()) return;
 
+  if (conversationId) {
+    await saveArtifact(conversationId, "researched", { count: evidence?.length || 0, evidence });
+  }
+
   send("progress", {
     stage: "researched",
     message: `Gathered ${Array.isArray(evidence) ? evidence.length : 0} evidence items`,
@@ -60,6 +76,10 @@ export async function runPipeline(query, send, isAborted = () => false) {
   const draft = await synthesize(query, domainProfile, evidence);
   if (isAborted()) return;
 
+  if (conversationId) {
+    await saveArtifact(conversationId, "synthesized", draft);
+  }
+
   send("progress", {
     stage: "synthesized",
     message: `Drafted ${draft.findings?.length || 0} findings across ${draft.sections?.length || 0} sections`,
@@ -75,6 +95,12 @@ export async function runPipeline(query, send, isAborted = () => false) {
 
   const report = await verify(query, domainProfile, draft);
   if (isAborted()) return;
+
+  if (conversationId) {
+    await saveArtifact(conversationId, "verified", { findingsCount: report.findings?.length || 0 });
+    await saveReport(conversationId, report);
+    await updateConversation(conversationId, { status: "completed" });
+  }
 
   const findingsCount = report.findings?.length || 0;
   const avgCertainty =

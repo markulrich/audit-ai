@@ -11,6 +11,7 @@ DoublyAI is an **explainable research platform** that generates professional-gra
 
 - **Frontend:** React 19 + Vite 6 (NOT Next.js — explicit founder preference)
 - **Backend:** Express with SSE streaming
+- **Database:** PostgreSQL on Fly.io (via `pg` driver, connection pooling)
 - **AI:** Anthropic Claude API (configurable via `ANTHROPIC_MODEL`, default `claude-3-7-sonnet-latest`) via `@anthropic-ai/sdk`
 - **Deployment:** fly.io with Docker (node:22-slim)
 
@@ -27,7 +28,7 @@ User Query → Classifier → Researcher → Synthesizer → Verifier → Report
 
 All agents share a single Anthropic client (`server/anthropic-client.js`) with 120s timeout and 2 retries.
 
-Pipeline orchestration is in `server/pipeline.js` — accepts `isAborted` callback to bail out if client disconnects.
+Pipeline orchestration is in `server/pipeline.js` — accepts `isAborted` callback to bail out if client disconnects. Pipeline also persists intermediate artifacts and the final report to PostgreSQL when `DATABASE_URL` is configured.
 
 ## Key Design Patterns
 
@@ -73,9 +74,15 @@ doublyai/
 │   ├── ARCHITECTURE.md          ← Detailed architecture doc
 │   └── AUDIT-LOG.md             ← Security/UX audit findings and fixes
 ├── server/
-│   ├── index.js                 ← Express server (rate limiting, SSE, security headers)
+│   ├── index.js                 ← Express server (rate limiting, SSE, security headers, report API)
 │   ├── anthropic-client.js      ← Shared Anthropic client (validates API key at startup)
-│   ├── pipeline.js              ← Orchestrates 4-stage agent pipeline
+│   ├── pipeline.js              ← Orchestrates 4-stage agent pipeline + DB persistence
+│   ├── db/
+│   │   ├── connection.js        ← PostgreSQL pool (singleton, optional)
+│   │   ├── migrate.js           ← Auto-run SQL migrations on startup
+│   │   ├── storage.js           ← CRUD for conversations, reports, artifacts
+│   │   └── migrations/
+│   │       └── 001_initial.sql  ← conversations, reports, artifacts tables
 │   └── agents/
 │       ├── classifier.js        ← Domain classification
 │       ├── researcher.js        ← Evidence gathering
@@ -88,7 +95,8 @@ doublyai/
 │   └── components/
 │       ├── QueryInput.jsx       ← Input with example query chips
 │       ├── ProgressStream.jsx   ← 4-stage streaming progress UI
-│       └── Report.jsx           ← Full interactive report with explanation panel
+│       ├── Report.jsx           ← Full interactive report with explanation panel
+│       └── ReportHistory.jsx    ← Paginated list of saved reports
 ├── package.json
 ├── vite.config.js               ← Proxies /api to Express backend
 ├── index.html                   ← Entry HTML (loads Inter font)
@@ -169,6 +177,7 @@ Report.jsx has a SECTION_TITLES map that also handles short forms (thesis, price
 ```bash
 cp .env.example .env
 # Add your ANTHROPIC_API_KEY to .env
+# Optionally set DATABASE_URL for local Postgres
 npm install
 npm run dev    # Starts Vite + Express concurrently
 ```
@@ -176,24 +185,55 @@ npm run dev    # Starts Vite + Express concurrently
 Frontend: http://localhost:5173 (proxies API to 3001)
 Backend: http://localhost:3001
 
+The app works without a database — report history is simply unavailable until `DATABASE_URL` is set.
+
 ## Deploying to fly.io
 
 ```bash
+# Create Postgres cluster (first time only)
+fly postgres create --name doublyai-db --region sjc
+fly postgres attach doublyai-db     # Sets DATABASE_URL secret automatically
+
 fly secrets set ANTHROPIC_API_KEY=your-key-here
 fly deploy
 ```
 
-## Current Status (as of Feb 7, 2026)
+Migrations run automatically on startup. The `DATABASE_URL` secret is set by `fly postgres attach`.
+
+## Database Schema
+
+Three tables in PostgreSQL, all with nullable `user_id` columns ready for future auth:
+
+- **conversations** — One per research query. Tracks query, domain, ticker, status (pending/running/completed/failed).
+- **reports** — Stores the full report JSONB plus denormalized fields (title, rating, ticker, overall_certainty, findings_count) for efficient listing.
+- **artifacts** — Intermediate pipeline outputs (classified, researched, synthesized, verified) for debugging and audit trails.
+
+Schema is in `server/db/migrations/001_initial.sql`. Migrations run automatically via `server/db/migrate.js`.
+
+## API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/generate` | Generate a new report (SSE stream) |
+| GET | `/api/reports` | List reports (paginated: `?limit=20&offset=0`) |
+| GET | `/api/reports/:id` | Get a saved report by ID |
+| DELETE | `/api/reports/:id` | Delete a report and its conversation/artifacts |
+| GET | `/api/health` | Health check (includes DB status) |
+
+## Current Status (as of Feb 8, 2026)
 
 ### Completed
 - Full V1 pipeline (classify → research → synthesize → verify)
 - Interactive report with Finding/Explanation UX
 - Security hardening (rate limiting, input validation, prompt injection guards, error sanitization, API key validation)
 - UX fixes (stale closure bug, AbortController, keyboard navigation, mobile responsive layout, browser tab title, empty state handling, orphaned finding cleanup)
+- PostgreSQL persistence (conversations, reports, artifacts) via Fly.io Postgres
+- Report history UI with pagination, delete, and reload from DB
+- Auto-migrations on startup
+- Graceful degradation when DATABASE_URL is not set
 
 ### Not Yet Done
 - Live web search integration (V1 uses Claude's training knowledge only)
-- Persistent storage / report history
 - User authentication
 - Feedback collection backend (currently client-side only)
 - Additional domain profiles (deal memo, scientific review)
@@ -207,3 +247,6 @@ fly deploy
 - The verifier always runs `cleanOrphanedRefs()` to remove dangling finding references after deletion
 - Optional chaining (`response.content?.[0]?.text`) is used throughout agents for robustness
 - React state closures are avoided in App.jsx by using local `let receivedReport` flags
+- Database is optional — all storage functions return null/empty when `DATABASE_URL` is unset
+- `server/index.js` uses an async `start()` function to init DB before listening
+- Pipeline saves artifacts at each stage for auditability; DB errors never block report generation

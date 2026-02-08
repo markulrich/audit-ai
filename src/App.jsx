@@ -2,6 +2,7 @@ import { useState, useRef } from "react";
 import QueryInput from "./components/QueryInput.jsx";
 import ProgressStream from "./components/ProgressStream.jsx";
 import Report from "./components/Report.jsx";
+import ReportHistory from "./components/ReportHistory.jsx";
 
 function isReportPayload(value) {
   return (
@@ -161,6 +162,11 @@ export default function App() {
     }
   };
 
+  const handleSelectReport = (reportData) => {
+    setReport(reportData);
+    setState("done");
+  };
+
   const handleReset = () => {
     // Abort any in-flight request
     if (abortRef.current) {
@@ -220,6 +226,11 @@ export default function App() {
         onSubmit={handleGenerate}
         disabled={state === "loading"}
       />
+
+      {/* Report History (idle state only) */}
+      {state === "idle" && (
+        <ReportHistory onSelectReport={handleSelectReport} />
+      )}
 
       {/* Progress */}
       {state === "loading" && (
