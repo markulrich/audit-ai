@@ -88,7 +88,9 @@ if (process.env.NODE_ENV === "production") {
 
 // ── SSE endpoint: generate an explainable report ────────────────────────────
 
-app.post("/api/generate", rateLimit, async (req, res) => {
+const applyRateLimit = process.env.NODE_ENV === "production" ? rateLimit : (req, res, next) => next();
+
+app.post("/api/generate", applyRateLimit, async (req, res) => {
   const { query } = req.body;
 
   // Input validation
