@@ -151,7 +151,7 @@ app.post("/api/generate", rateLimit, async (req, res) => {
           : err.status === 401 || err.status === 403
           ? `ANTHROPIC_API_KEY was rejected by the API (HTTP ${err.status}). Check that it is valid.`
           : err.status === 429
-          ? "API rate limit hit. Please wait a minute and try again."
+          ? `Anthropic API rate limit hit during ${err.stage || "pipeline"} stage: ${err.message || "Too many requests"}. Please wait a minute and try again.`
           : err.status >= 500
           ? `Upstream API error (HTTP ${err.status}). Please try again shortly.`
           : `Pipeline failed: ${err.message || "Unknown error"}`;
