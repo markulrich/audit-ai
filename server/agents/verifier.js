@@ -1,4 +1,4 @@
-import { createMessage } from "../anthropic-client.js";
+import { tracedCreate } from "../anthropic-client.js";
 
 /**
  * Removes finding references from section content arrays when the finding
@@ -44,7 +44,7 @@ function cleanOrphanedRefs(report) {
 export async function verify(query, domainProfile, draft) {
   const { ticker, companyName } = domainProfile;
 
-  const response = await createMessage({
+  const params = {
     max_tokens: 16384,
     system: `You are an adversarial fact-checker and research quality auditor. Your job is to find problems with every finding in a draft equity research report.
 
@@ -144,7 +144,12 @@ Return the complete report JSON. No markdown fences. No commentary.`,
         content: `Review this draft equity research report on ${companyName} (${ticker}). Be ruthlessly skeptical. Find every error, every weak claim, every missing caveat.\n\n${JSON.stringify(draft, null, 2)}`,
       },
     ],
-  });
+  };
+
+  const { response, trace } = await tracedCreate(params);
+
+  // Track which findings were removed and certainty changes for the trace
+  const preFindingIds = new Set((draft.findings || []).map((f) => f.id));
 
   try {
     const text = response.content?.[0]?.text;
@@ -163,7 +168,27 @@ Return the complete report JSON. No markdown fences. No commentary.`,
     // Clean orphaned finding refs from section content arrays
     cleanOrphanedRefs(report);
 
-    return report;
+    // Build verification diff for trace
+    const postFindingIds = new Set((report.findings || []).map((f) => f.id));
+    const removedFindings = [...preFindingIds].filter((id) => !postFindingIds.has(id));
+    const certaintySummary = (report.findings || []).map((f) => ({
+      id: f.id,
+      certainty: f.certainty,
+      contraryCount: f.explanation?.contraryEvidence?.length || 0,
+    }));
+
+    return {
+      result: report,
+      trace: {
+        ...trace,
+        parsedOutput: {
+          findingsCount: report.findings?.length || 0,
+          overallCertainty: report.meta?.overallCertainty,
+          removedFindings,
+          certaintySummary,
+        },
+      },
+    };
   } catch (e) {
     console.error("Verification agent parse error:", e.message);
     const rawText = response.content?.[0]?.text || "";
@@ -178,7 +203,10 @@ Return the complete report JSON. No markdown fences. No commentary.`,
           );
         }
         cleanOrphanedRefs(report);
-        return report;
+        return {
+          result: report,
+          trace: { ...trace, parseWarning: "Extracted via regex fallback" },
+        };
       } catch (parseErr) {
         console.error("Verification agent regex fallback parse error:", parseErr.message);
       }
@@ -201,6 +229,9 @@ Return the complete report JSON. No markdown fences. No commentary.`,
           )
         : 0;
     cleanOrphanedRefs(draft);
-    return draft;
+    return {
+      result: draft,
+      trace: { ...trace, parseWarning: "Verification failed, used draft with default scores" },
+    };
   }
 }

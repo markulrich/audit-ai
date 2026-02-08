@@ -1,4 +1,4 @@
-import { createMessage } from "../anthropic-client.js";
+import { tracedCreate } from "../anthropic-client.js";
 
 /**
  * Synthesis Agent — transforms raw evidence into a structured research report.
@@ -11,7 +11,7 @@ import { createMessage } from "../anthropic-client.js";
 export async function synthesize(query, domainProfile, evidence) {
   const { ticker, companyName } = domainProfile;
 
-  const response = await createMessage({
+  const params = {
     max_tokens: 16384,
     system: `You are a senior equity research analyst at a top-tier investment bank (Morgan Stanley, JPMorgan, Goldman Sachs caliber).
 
@@ -119,20 +119,41 @@ Respond with JSON only. No markdown fences. No commentary.`,
         content: `Here is the evidence gathered for ${companyName} (${ticker}). Synthesize this into a structured equity research report:\n\n${JSON.stringify(evidence, null, 2)}`,
       },
     ],
-  });
+  };
+
+  const { response, trace } = await tracedCreate(params);
 
   try {
     const text = response.content?.[0]?.text;
     if (!text) throw new Error("Empty synthesizer response");
     const cleaned = text.replace(/```json\n?|\n?```/g, "").trim();
-    return JSON.parse(cleaned);
+    const result = JSON.parse(cleaned);
+    return {
+      result,
+      trace: {
+        ...trace,
+        parsedOutput: {
+          findingsCount: result.findings?.length || 0,
+          sectionsCount: result.sections?.length || 0,
+          rating: result.meta?.rating,
+        },
+      },
+    };
   } catch (e) {
     console.error("Synthesis agent parse error:", e.message);
     const rawText = response.content?.[0]?.text || "";
     const match = rawText.match(/\{[\s\S]*\}/);
     if (match) {
       try {
-        return JSON.parse(match[0]);
+        const result = JSON.parse(match[0]);
+        return {
+          result,
+          trace: {
+            ...trace,
+            parsedOutput: { findingsCount: result.findings?.length || 0, sectionsCount: result.sections?.length || 0 },
+            parseWarning: "Extracted via regex fallback",
+          },
+        };
       } catch (parseErr) {
         console.error("Synthesis agent regex fallback parse error:", parseErr.message);
       }

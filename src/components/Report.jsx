@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import ReportDetails from "./ReportDetails.jsx";
 
 // ─── Styles ────────────────────────────────────────────────────────────────────
 
@@ -426,9 +427,10 @@ function useIsMobile() {
 
 // ─── Main Report Component ─────────────────────────────────────────────────────
 
-export default function Report({ data, onBack }) {
+export default function Report({ data, traceData, onBack }) {
   const [activeId, setActiveId] = useState("overview");
   const [showPanel, setShowPanel] = useState(false); // for mobile panel toggle
+  const [showDetails, setShowDetails] = useState(false);
   const panelRef = useRef(null);
   const isMobile = useIsMobile();
 
@@ -565,24 +567,43 @@ export default function Report({ data, onBack }) {
       {/* ── Report Panel ── */}
       <div style={{ flex: 1, overflow: "auto" }}>
         <div style={{ maxWidth: 780, margin: "0 auto", padding: isMobile ? "20px 16px 60px" : "32px 40px 60px" }}>
-          {/* Back button */}
-          <button
-            onClick={onBack}
-            aria-label="Start new report"
-            style={{
-              marginBottom: 16,
-              padding: "4px 12px",
-              fontSize: 12,
-              fontWeight: 500,
-              border: `1px solid ${COLORS.border}`,
-              borderRadius: 4,
-              background: "#fff",
-              color: COLORS.textSecondary,
-              cursor: "pointer",
-            }}
-          >
-            ← New Report
-          </button>
+          {/* Top buttons */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+            <button
+              onClick={onBack}
+              aria-label="Start new report"
+              style={{
+                padding: "4px 12px",
+                fontSize: 12,
+                fontWeight: 500,
+                border: `1px solid ${COLORS.border}`,
+                borderRadius: 4,
+                background: "#fff",
+                color: COLORS.textSecondary,
+                cursor: "pointer",
+              }}
+            >
+              ← New Report
+            </button>
+            {traceData && traceData.length > 0 && (
+              <button
+                onClick={() => setShowDetails(true)}
+                aria-label="View report generation details"
+                style={{
+                  padding: "4px 12px",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  border: `1px solid ${COLORS.accent}40`,
+                  borderRadius: 4,
+                  background: COLORS.accent + "08",
+                  color: COLORS.accent,
+                  cursor: "pointer",
+                }}
+              >
+                Report Details
+              </button>
+            )}
+          </div>
 
           {/* Overall Certainty Banner */}
           <div
@@ -946,6 +967,11 @@ export default function Report({ data, onBack }) {
         >
           {panelContent}
         </div>
+      )}
+
+      {/* Report Details Modal */}
+      {showDetails && (
+        <ReportDetails traceData={traceData} onClose={() => setShowDetails(false)} />
       )}
     </div>
   );

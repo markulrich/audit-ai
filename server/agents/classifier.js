@@ -1,4 +1,4 @@
-import { createMessage } from "../anthropic-client.js";
+import { tracedCreate } from "../anthropic-client.js";
 
 const DOMAIN_PROFILES = {
   equity_research: {
@@ -38,7 +38,7 @@ const DOMAIN_PROFILES = {
  * For V1, we only support equity_research but the architecture supports expansion.
  */
 export async function classifyDomain(query) {
-  const response = await createMessage({
+  const params = {
     max_tokens: 512,
     system: `You are a query classifier for DoublyAI, an explainable research platform.
 Given a user query, determine which research domain it belongs to.
@@ -58,27 +58,30 @@ Respond with JSON only:
 If the query doesn't match any supported domain, still use "equity_research" as the closest match for V1.
 Extract the stock ticker if mentioned or inferable. Extract the company name.`,
     messages: [{ role: "user", content: `<user_query>\n${query}\n</user_query>` }],
-  });
+  };
+
+  const { response, trace } = await tracedCreate(params);
 
   try {
     const text = response.content?.[0]?.text;
     if (!text) throw new Error("Empty classifier response");
     const json = JSON.parse(text.replace(/```json\n?|\n?```/g, "").trim());
-    return {
+    const result = {
       ...DOMAIN_PROFILES.equity_research,
       ticker: json.ticker || "N/A",
       companyName: json.companyName || query,
       focusAreas: json.focusAreas || [],
       timeframe: json.timeframe || "current",
     };
+    return { result, trace: { ...trace, parsedOutput: json } };
   } catch {
-    // Fallback: use equity_research with the raw query
-    return {
+    const result = {
       ...DOMAIN_PROFILES.equity_research,
       ticker: "N/A",
       companyName: query,
       focusAreas: [],
       timeframe: "current",
     };
+    return { result, trace: { ...trace, parsedOutput: null, parseError: "Fallback used" } };
   }
 }

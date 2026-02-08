@@ -43,6 +43,7 @@ export default function App() {
   const [progress, setProgress] = useState([]);
   const [report, setReport] = useState(null);
   const [error, setError] = useState(null);
+  const [traceData, setTraceData] = useState([]);
   const abortRef = useRef(null);
 
   const handleGenerate = async (query) => {
@@ -55,6 +56,7 @@ export default function App() {
     setProgress([]);
     setReport(null);
     setError(null);
+    setTraceData([]);
 
     // Local flags to avoid stale closure over React state
     let receivedReport = false;
@@ -84,6 +86,11 @@ export default function App() {
       const handleEventPayload = (eventType, payload) => {
         if (eventType === "progress") {
           setProgress((prev) => [...prev, payload]);
+          return;
+        }
+
+        if (eventType === "trace") {
+          setTraceData((prev) => [...prev, payload]);
           return;
         }
 
@@ -171,10 +178,11 @@ export default function App() {
     setProgress([]);
     setReport(null);
     setError(null);
+    setTraceData([]);
   };
 
   if (state === "done" && report) {
-    return <Report data={report} onBack={handleReset} />;
+    return <Report data={report} traceData={traceData} onBack={handleReset} />;
   }
 
   return (
