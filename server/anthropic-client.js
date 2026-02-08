@@ -1,5 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
 
+console.log("[startup] anthropic-client.js loading...");
+console.log("[startup] ANTHROPIC_API_KEY set:", !!process.env.ANTHROPIC_API_KEY);
+console.log("[startup] NODE_ENV:", process.env.NODE_ENV);
+console.log("[startup] PORT:", process.env.PORT);
+
 if (!process.env.ANTHROPIC_API_KEY) {
   console.error(
     "FATAL: ANTHROPIC_API_KEY environment variable is not set.\n" +
@@ -9,11 +14,13 @@ if (!process.env.ANTHROPIC_API_KEY) {
   process.exit(1);
 }
 
+console.log("[startup] Creating Anthropic client...");
 export const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
   timeout: 120_000,
   maxRetries: 2,
 });
+console.log("[startup] Anthropic client created successfully");
 
 // For testing, use haiku to save $, but in prod use sonnet or opus.
 export const ANTHROPIC_MODEL =
