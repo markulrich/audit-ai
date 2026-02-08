@@ -14,3 +14,39 @@ export const client = new Anthropic({
   timeout: 120_000,
   maxRetries: 2,
 });
+
+export const ANTHROPIC_MODEL =
+  process.env.ANTHROPIC_MODEL || "claude-3-7-sonnet-latest";
+
+const MODEL_FALLBACKS = [
+  ANTHROPIC_MODEL,
+  "claude-3-5-sonnet-latest",
+];
+
+function isModelNotFound(err) {
+  const status = err?.status;
+  const message = `${err?.message || ""} ${err?.error?.error?.message || ""}`.toLowerCase();
+  return status === 404 && message.includes("model");
+}
+
+export async function createMessage(params) {
+  const requestedModel = params.model;
+  const candidateModels = [
+    ...new Set([requestedModel, ...MODEL_FALLBACKS].filter(Boolean)),
+  ];
+
+  let lastModelError = null;
+  for (const model of candidateModels) {
+    try {
+      return await client.messages.create({ ...params, model });
+    } catch (err) {
+      if (isModelNotFound(err)) {
+        lastModelError = err;
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  throw lastModelError || new Error("No available Anthropic model.");
+}

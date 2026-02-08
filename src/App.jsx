@@ -3,6 +3,41 @@ import QueryInput from "./components/QueryInput.jsx";
 import ProgressStream from "./components/ProgressStream.jsx";
 import Report from "./components/Report.jsx";
 
+function isReportPayload(value) {
+  return (
+    value &&
+    typeof value === "object" &&
+    value.meta &&
+    typeof value.meta === "object" &&
+    Array.isArray(value.sections) &&
+    Array.isArray(value.findings)
+  );
+}
+
+function parseSseBlock(block) {
+  const lines = block.split(/\r?\n/);
+  let eventType = "message";
+  const dataLines = [];
+
+  for (const line of lines) {
+    if (!line || line.startsWith(":")) continue;
+
+    const separatorIndex = line.indexOf(":");
+    const field = separatorIndex === -1 ? line : line.slice(0, separatorIndex);
+    let value = separatorIndex === -1 ? "" : line.slice(separatorIndex + 1);
+    if (value.startsWith(" ")) value = value.slice(1);
+
+    if (field === "event") {
+      eventType = value.trim() || "message";
+    } else if (field === "data") {
+      dataLines.push(value);
+    }
+  }
+
+  if (dataLines.length === 0) return null;
+  return { eventType, data: dataLines.join("\n") };
+}
+
 export default function App() {
   const [state, setState] = useState("idle"); // idle | loading | done | error
   const [progress, setProgress] = useState([]);
@@ -38,42 +73,81 @@ export default function App() {
         throw new Error(body.error || `Server error: ${res.status}`);
       }
 
+      if (!res.body) {
+        throw new Error("Empty response body from /api/generate");
+      }
+
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      let eventType = null;
+
+      const handleEventPayload = (eventType, payload) => {
+        if (eventType === "progress") {
+          setProgress((prev) => [...prev, payload]);
+          return;
+        }
+
+        if (eventType === "error" || (eventType === "message" && typeof payload?.error === "string")) {
+          receivedError = true;
+          setError(payload?.message || payload?.error || "Report generation failed.");
+          setState("error");
+          return;
+        }
+
+        if (eventType === "report" || (eventType === "message" && isReportPayload(payload))) {
+          receivedReport = true;
+          setReport(payload);
+          setState("done");
+        }
+      };
+
+      const handleSerializedData = (eventType, serialized) => {
+        try {
+          const payload = JSON.parse(serialized);
+          handleEventPayload(eventType, payload);
+        } catch {
+          // skip malformed JSON
+        }
+      };
+
+      const flushBuffer = (force = false) => {
+        const separator = /\r?\n\r?\n/g;
+        let start = 0;
+        let match;
+
+        while ((match = separator.exec(buffer)) !== null) {
+          const block = buffer.slice(start, match.index);
+          start = match.index + match[0].length;
+
+          const parsed = parseSseBlock(block);
+          if (parsed) handleSerializedData(parsed.eventType, parsed.data);
+        }
+
+        buffer = buffer.slice(start);
+
+        if (!force || buffer.trim().length === 0) return;
+
+        const parsed = parseSseBlock(buffer);
+        if (parsed) {
+          handleSerializedData(parsed.eventType, parsed.data);
+          buffer = "";
+          return;
+        }
+
+        // Fallback: accept plain JSON 200 responses from non-streaming backends.
+        handleSerializedData("message", buffer);
+        buffer = "";
+      };
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-        for (const line of lines) {
-          if (line.startsWith("event: ")) {
-            eventType = line.slice(7).trim();
-          } else if (line.startsWith("data: ") && eventType) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              if (eventType === "progress") {
-                setProgress((prev) => [...prev, data]);
-              } else if (eventType === "report") {
-                receivedReport = true;
-                setReport(data);
-                setState("done");
-              } else if (eventType === "error") {
-                receivedError = true;
-                setError(data.message);
-                setState("error");
-              }
-            } catch {
-              // skip malformed JSON
-            }
-            eventType = null;
-          }
-        }
+        flushBuffer();
       }
+      buffer += decoder.decode();
+      flushBuffer(true);
 
       // If stream ended without a report or error event
       if (!receivedReport && !receivedError) {

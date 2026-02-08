@@ -100,10 +100,14 @@ app.post("/api/generate", rateLimit, async (req, res) => {
     "X-Content-Type-Options": "nosniff",
   });
 
-  // Track client disconnect so we can abort the pipeline
+  // Track true client disconnects so we can abort the pipeline.
+  // Do not rely on req.close for POST bodies; that can fire after request read.
   let aborted = false;
-  req.on("close", () => {
+  req.on("aborted", () => {
     aborted = true;
+  });
+  res.on("close", () => {
+    if (!res.writableEnded) aborted = true;
   });
 
   const send = (event, data) => {
