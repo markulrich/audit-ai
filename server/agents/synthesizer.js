@@ -8,11 +8,33 @@ import { tracedCreate } from "../anthropic-client.js";
  *   - Sections with content flow (interleaved findings and connecting text)
  *   - Findings with initial explanations and supporting evidence
  */
-export async function synthesize(query, domainProfile, evidence, send) {
+export async function synthesize(query, domainProfile, evidence, send, config = {}) {
   const { ticker, companyName } = domainProfile;
 
+  const totalFindings = config.totalFindings || "25-35";
+  const findingsPerSection = config.findingsPerSection || "3-5";
+  const supportingEvidenceMin = config.supportingEvidenceMin || 3;
+  const explanationLength = config.explanationLength || "2-4 sentences";
+  const keyStatsCount = config.keyStatsCount || 6;
+
+  // Build keyStats example dynamically based on count
+  const keyStatsBase = [
+    '{ "label": "Price Target", "value": "$XXX" }',
+    '{ "label": "Current Price", "value": "$XXX.XX" }',
+    '{ "label": "Upside", "value": "~XX%" }',
+    '{ "label": "Market Cap", "value": "$X.XT" }',
+    '{ "label": "P/E (TTM)", "value": "XXx" }',
+    '{ "label": "FY26E EPS", "value": "$X.XX" }',
+    '{ "label": "Revenue Growth", "value": "XX%" }',
+    '{ "label": "Gross Margin", "value": "XX%" }',
+  ];
+  const keyStatsExample = keyStatsBase.slice(0, keyStatsCount).join(",\n      ");
+
+  // Derive max finding ID from total findings range
+  const maxFinding = parseInt(totalFindings.split("-").pop(), 10) || 30;
+
   const params = {
-    max_tokens: 16384,
+    ...(config.synthesizerModel && { model: config.synthesizerModel }),
     system: `You are a senior equity research analyst at a top-tier investment bank (Morgan Stanley, JPMorgan, Goldman Sachs caliber).
 
 You are writing an initiating coverage report on ${companyName} (${ticker}).
@@ -35,12 +57,7 @@ YOUR TASK: Given the evidence below, produce a structured JSON report. You MUST 
     "exchange": "NASDAQ",
     "sector": "...",
     "keyStats": [
-      { "label": "Price Target", "value": "$XXX" },
-      { "label": "Current Price", "value": "$XXX.XX" },
-      { "label": "Upside", "value": "~XX%" },
-      { "label": "Market Cap", "value": "$X.XT" },
-      { "label": "P/E (TTM)", "value": "XXx" },
-      { "label": "FY26E EPS", "value": "$X.XX" }
+      ${keyStatsExample}
     ]
   },
   "sections": [
@@ -91,18 +108,18 @@ RULES FOR FINDINGS:
 1. Each finding is ONE declarative sentence — a specific, verifiable claim with numbers
 2. Findings are sentence fragments that FLOW NATURALLY when woven into the content array. Some may be complete sentences, others may be clauses (e.g., "with a market capitalization of approximately $4.5 trillion") that connect via text nodes
 3. Findings must be based on the evidence provided — do not invent data
-4. Each finding must have at least 3 supporting evidence items from the provided evidence (more is better)
+4. Each finding must have at least ${supportingEvidenceMin} supporting evidence items from the provided evidence (more is better)
 5. Set contraryEvidence to an empty array [] — the Verification Agent will populate it later
 6. The explanation "title" should be 2-5 words summarizing the claim (e.g., "Q4 Revenue Figure", "Market Share Estimate")
-7. The explanation "text" should be 2-4 sentences providing context, significance, and nuance beyond the finding itself
-8. Produce 25-35 findings total, distributed across all sections
-9. Use sequential IDs: f1, f2, f3, ... f30
+7. The explanation "text" should be ${explanationLength} providing context, significance, and nuance beyond the finding itself
+8. Produce ${totalFindings} findings total, distributed across all sections
+9. Use sequential IDs: f1, f2, f3, ... f${maxFinding}
 
 RULES FOR SECTIONS:
 1. Use these section IDs: investment_thesis, recent_price_action, financial_performance, product_and_technology, competitive_landscape, industry_and_macro, key_risks, analyst_consensus
 2. The "content" array weaves findings into natural prose. Reading all the text values and finding texts in order should produce coherent paragraphs
 3. Connecting text should read like professional equity research — not bullet points
-4. Each section should have 3-5 findings
+4. Each section should have ${findingsPerSection} findings
 5. Include a "title" field for each section (e.g., "Investment Thesis", "Recent Price Action")
 6. Use { "type": "break" } to separate logical paragraph groups within a section. Sections with 4+ findings SHOULD have at least one break. For example: first paragraph covers the headline metrics, break, second paragraph covers details and context. This creates visual breathing room — a wall of text is unprofessional
 
@@ -110,7 +127,7 @@ RULES FOR META:
 1. The rating should reflect the evidence (Overweight if bullish, Underweight if bearish)
 2. Price target should be based on analyst consensus from the evidence
 3. All numbers must come from the evidence — never guess
-4. keyStats should have exactly 6 items in the order shown above
+4. keyStats should have exactly ${keyStatsCount} items in the order shown above
 
 Respond with JSON only. No markdown fences. No commentary.`,
     messages: [
@@ -130,7 +147,7 @@ Respond with JSON only. No markdown fences. No commentary.`,
       trace: {
         request: {
           model: params.model || "(default)",
-          max_tokens: params.max_tokens,
+          max_tokens: "(model max)",
           system: params.system,
           messages: params.messages,
         },
@@ -159,22 +176,142 @@ Respond with JSON only. No markdown fences. No commentary.`,
   } catch (e) {
     console.error("Synthesis agent parse error:", e.message);
     const rawText = response.content?.[0]?.text || "";
-    const match = rawText.match(/\{[\s\S]*\}/);
-    if (match) {
+    const stopReason = response.stop_reason;
+
+    // If the response was truncated (max_tokens), try repair first since
+    // balanced-brace extraction would only find incomplete sub-objects.
+    if (stopReason === "max_tokens" && rawText.length > 0) {
+      console.warn("Synthesis agent response was truncated at max_tokens, attempting repair");
+      const repaired = repairTruncatedJson(rawText.replace(/```json\n?|\n?```/g, "").trim());
+      if (repaired) {
+        try {
+          const result = JSON.parse(repaired);
+          return {
+            result,
+            trace: {
+              ...trace,
+              parsedOutput: { findingsCount: result.findings?.length || 0, sectionsCount: result.sections?.length || 0 },
+              parseWarning: "Repaired truncated JSON (max_tokens)",
+            },
+          };
+        } catch (repairErr) {
+          console.error("Synthesis agent truncation repair failed:", repairErr.message);
+        }
+      }
+    }
+
+    // Try balanced-brace extraction to find a valid JSON object
+    // (for cases where AI wrapped valid JSON in commentary text)
+    const extracted = extractJsonObject(rawText);
+    if (extracted) {
       try {
-        const result = JSON.parse(match[0]);
+        const result = JSON.parse(extracted);
         return {
           result,
           trace: {
             ...trace,
             parsedOutput: { findingsCount: result.findings?.length || 0, sectionsCount: result.sections?.length || 0 },
-            parseWarning: "Extracted via regex fallback",
+            parseWarning: "Extracted via balanced-brace fallback",
           },
         };
       } catch (parseErr) {
-        console.error("Synthesis agent regex fallback parse error:", parseErr.message);
+        console.error("Synthesis agent brace-match fallback parse error:", parseErr.message);
       }
     }
-    throw new Error("Synthesis agent failed to produce valid report");
+
+    const error = new Error("Synthesis agent failed to produce valid report");
+    error.agentTrace = trace;
+    error.rawOutput = rawText;
+    throw error;
   }
+}
+
+/**
+ * Extract a JSON object from text with surrounding commentary by finding
+ * balanced brace pairs. Avoids the greedy regex pitfall.
+ */
+function extractJsonObject(text) {
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== "{") continue;
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+    for (let j = i; j < text.length; j++) {
+      const ch = text[j];
+      if (escape) { escape = false; continue; }
+      if (ch === "\\" && inString) { escape = true; continue; }
+      if (ch === '"') { inString = !inString; continue; }
+      if (inString) continue;
+      if (ch === "{") depth++;
+      if (ch === "}") {
+        depth--;
+        if (depth === 0) {
+          const candidate = text.slice(i, j + 1);
+          try {
+            JSON.parse(candidate);
+            return candidate;
+          } catch {
+            break; // Not valid JSON, try the next '{' in the outer loop
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Attempt to repair truncated JSON by closing all open brackets and braces.
+ * This handles the common case where the model hits max_tokens mid-output.
+ *
+ * Strategy: walk the text tracking open structures, then progressively
+ * trim from the end to find a clean cut point (not inside a string or
+ * key-value pair), and close all remaining open structures.
+ */
+function repairTruncatedJson(text) {
+  // Find a clean cut point by trimming back to the last complete value
+  // Try several strategies, from least to most aggressive:
+  const candidates = [
+    text,
+    // Strip trailing incomplete string (unmatched quote at end)
+    text.replace(/,?\s*"[^"]*$/, ""),
+    // Strip trailing incomplete key-value pair
+    text.replace(/,?\s*"[^"]*"\s*:\s*"?[^"{}[\]]*$/, ""),
+    // Strip back to the last closing brace/bracket
+    text.replace(/[^}\]]*$/, ""),
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate || candidate.length < 2) continue;
+
+    const closers = [];
+    let inString = false;
+    let escape = false;
+    let valid = true;
+
+    for (let i = 0; i < candidate.length; i++) {
+      const ch = candidate[i];
+      if (escape) { escape = false; continue; }
+      if (ch === "\\" && inString) { escape = true; continue; }
+      if (ch === '"') { inString = !inString; continue; }
+      if (inString) continue;
+      if (ch === "{") closers.push("}");
+      else if (ch === "[") closers.push("]");
+      else if (ch === "}" || ch === "]") closers.pop();
+    }
+
+    // If we're stuck inside a string, this cut point isn't clean
+    if (inString) continue;
+    if (closers.length === 0) continue;
+
+    const repaired = candidate + closers.reverse().join("");
+    try {
+      JSON.parse(repaired);
+      return repaired;
+    } catch {
+      // This cut point didn't produce valid JSON, try the next one
+    }
+  }
+
+  return null;
 }

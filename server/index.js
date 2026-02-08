@@ -89,7 +89,7 @@ if (process.env.NODE_ENV === "production") {
 // ── SSE endpoint: generate an explainable report ────────────────────────────
 
 app.post("/api/generate", rateLimit, async (req, res) => {
-  const { query } = req.body;
+  const { query, reasoningLevel } = req.body;
 
   // Input validation
   if (!query || typeof query !== "string" || query.trim().length < 3) {
@@ -132,23 +132,35 @@ app.post("/api/generate", rateLimit, async (req, res) => {
   }, 15_000);
 
   try {
-    await runPipeline(query.trim(), send, () => aborted);
+    await runPipeline(query.trim(), send, () => aborted, reasoningLevel);
     if (!aborted) send("done", { success: true });
   } catch (err) {
     console.error("Pipeline error:", err);
     if (!aborted) {
-      // Sanitize error message — never leak internals
+      // Show detailed error info for debugging
+      const detail = {
+        message: err.message || "Unknown error",
+        stage: err.stage || "unknown",
+        status: err.status || null,
+        type: err.constructor?.name || "Error",
+        rawOutputPreview: err.rawOutput ? err.rawOutput.slice(0, 500) + (err.rawOutput.length > 500 ? "..." : "") : null,
+        stopReason: err.agentTrace?.response?.stop_reason || null,
+        tokenUsage: err.agentTrace?.response?.usage || null,
+        durationMs: err.agentTrace?.timing?.durationMs || null,
+      };
+
       const safeMessage =
         err.keyMissing
           ? "ANTHROPIC_API_KEY is not set. Configure it on the server to enable report generation."
           : err.status === 401 || err.status === 403
-          ? "ANTHROPIC_API_KEY is set but was rejected by the API. Check that it is valid."
+          ? `ANTHROPIC_API_KEY was rejected by the API (HTTP ${err.status}). Check that it is valid.`
           : err.status === 429
-          ? "API rate limit hit. Please wait a minute and try again."
+          ? `Anthropic API rate limit hit during ${err.stage || "pipeline"} stage: ${err.message || "Too many requests"}. Please wait a minute and try again.`
           : err.status >= 500
-          ? "Upstream API error. Please try again shortly."
-          : "Report generation failed. Please try a different query.";
-      send("error", { message: safeMessage });
+          ? `Upstream API error (HTTP ${err.status}). Please try again shortly.`
+          : `Pipeline failed: ${err.message || "Unknown error"}`;
+
+      send("error", { message: safeMessage, detail });
     }
   } finally {
     clearInterval(heartbeat);

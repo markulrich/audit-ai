@@ -53,12 +53,12 @@ const STAGE_CONFIG = [
 
 // ─── Elapsed timer hook ─────────────────────────────────────────────────────
 
-function useElapsed(active) {
+function useElapsed(active, frozen) {
   const [elapsed, setElapsed] = useState(0);
   const startRef = useRef(null);
 
   useEffect(() => {
-    if (active) {
+    if (active && !frozen) {
       startRef.current = Date.now();
       setElapsed(0);
       const interval = setInterval(() => {
@@ -66,7 +66,7 @@ function useElapsed(active) {
       }, 100);
       return () => clearInterval(interval);
     }
-  }, [active]);
+  }, [active, frozen]);
 
   return (elapsed / 1000).toFixed(1);
 }
@@ -143,13 +143,14 @@ function MiniCodeBlock({ content, maxHeight }) {
 
 // ─── Single stage card ──────────────────────────────────────────────────────
 
-function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent, isActive, isDone, isPending }) {
+function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent, isActive, isDone, isPending, isFailed, errorMessage, errorDetail }) {
   const [expanded, setExpanded] = useState(false);
   const [drillTab, setDrillTab] = useState("overview");
-  const elapsedSec = useElapsed(isActive);
+  const elapsedSec = useElapsed(isActive || isFailed, isFailed);
   const data = doneData || activeData;
   const stats = data?.stats;
   const prevPendingRef = useRef(null);
+  const prevFailedRef = useRef(false);
 
   // Use completed trace if available, otherwise use pending (pre-call) trace
   const activeTrace = traceEvent || pendingTraceEvent;
@@ -163,13 +164,23 @@ function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent
     prevPendingRef.current = pendingTraceEvent;
   }, [pendingTraceEvent, isActive]);
 
+  // Auto-expand and show raw output when stage fails
+  useEffect(() => {
+    if (isFailed && !prevFailedRef.current) {
+      setExpanded(true);
+      // Show raw output tab if trace data is available, otherwise show overview
+      setDrillTab(activeTrace ? "raw" : "overview");
+    }
+    prevFailedRef.current = isFailed;
+  }, [isFailed, activeTrace]);
+
   return (
     <div
       style={{
-        border: `1px solid ${isDone ? config.color + "40" : isActive ? config.color + "60" : COLORS.border}`,
-        borderLeft: `3px solid ${isDone ? config.color : isActive ? config.color : COLORS.border}`,
+        border: `1px solid ${isFailed ? COLORS.red + "60" : isDone ? config.color + "40" : isActive ? config.color + "60" : COLORS.border}`,
+        borderLeft: `3px solid ${isFailed ? COLORS.red : isDone ? config.color : isActive ? config.color : COLORS.border}`,
         borderRadius: 6,
-        background: isActive ? config.color + "06" : isDone ? "#fff" : "#fafafa",
+        background: isFailed ? COLORS.red + "06" : isActive ? config.color + "06" : isDone ? "#fff" : "#fafafa",
         opacity: isPending ? 0.4 : 1,
         transition: "all 0.3s",
         overflow: "hidden",
@@ -177,7 +188,7 @@ function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent
     >
       {/* Header — always visible, clickable when done */}
       <button
-        onClick={() => (isDone || isActive) && setExpanded(!expanded)}
+        onClick={() => (isDone || isActive || isFailed) && setExpanded(!expanded)}
         disabled={isPending}
         style={{
           width: "100%",
@@ -202,18 +213,20 @@ function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent
             alignItems: "center",
             justifyContent: "center",
             flexShrink: 0,
-            background: isDone
+            background: isFailed
+              ? COLORS.red
+              : isDone
               ? config.color
               : isActive
               ? config.color + "20"
               : COLORS.border,
-            color: isDone ? "#fff" : isActive ? config.color : COLORS.textMuted,
-            fontSize: isDone ? 11 : 10,
+            color: isFailed ? "#fff" : isDone ? "#fff" : isActive ? config.color : COLORS.textMuted,
+            fontSize: isDone || isFailed ? 11 : 10,
             fontWeight: 800,
-            border: isActive ? `2px solid ${config.color}` : "none",
+            border: isActive && !isFailed ? `2px solid ${config.color}` : "none",
           }}
         >
-          {isDone ? "✓" : config.icon}
+          {isFailed ? "✗" : isDone ? "✓" : config.icon}
         </div>
 
         {/* Title + message */}
@@ -223,25 +236,25 @@ function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent
               style={{
                 fontSize: 13,
                 fontWeight: 700,
-                color: isDone || isActive ? COLORS.text : COLORS.textMuted,
+                color: isFailed ? COLORS.red : isDone || isActive ? COLORS.text : COLORS.textMuted,
               }}
             >
-              {isDone ? config.doneLabel : config.label}
+              {isFailed ? `${config.label} — Failed` : isDone ? config.doneLabel : config.label}
             </span>
-            {isActive && <PulsingDot color={config.color} />}
+            {isActive && !isFailed && <PulsingDot color={config.color} />}
           </div>
-          {data?.message && (
+          {(data?.message || errorMessage) && (
             <div
               style={{
                 fontSize: 11,
-                color: COLORS.textSecondary,
+                color: isFailed ? COLORS.red : COLORS.textSecondary,
                 marginTop: 2,
-                whiteSpace: "nowrap",
+                whiteSpace: isFailed ? "normal" : "nowrap",
                 overflow: "hidden",
-                textOverflow: "ellipsis",
+                textOverflow: isFailed ? "unset" : "ellipsis",
               }}
             >
-              {data.message}
+              {isFailed ? errorMessage : data.message}
             </div>
           )}
         </div>
@@ -255,13 +268,13 @@ function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent
             flexShrink: 0,
           }}
         >
-          {isActive && (
+          {(isActive || isFailed) && !isDone && (
             <span
               style={{
                 fontSize: 11,
                 fontFamily: "monospace",
                 fontWeight: 600,
-                color: config.color,
+                color: isFailed ? COLORS.red : config.color,
               }}
             >
               {elapsedSec}s
@@ -293,7 +306,7 @@ function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent
               {stats.inputTokens.toLocaleString()}+{stats.outputTokens?.toLocaleString()} tok
             </span>
           )}
-          {(isDone || isActive) && (
+          {(isDone || isActive || isFailed) && (
             <span
               style={{
                 fontSize: 10,
@@ -598,7 +611,8 @@ function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent
                   { id: "overview", label: "Overview" },
                   { id: "system", label: "System Prompt" },
                   { id: "user", label: "User Msg" },
-                  { id: "raw", label: "Raw Output", disabled: !traceEvent },
+                  { id: "raw", label: "Raw Output", disabled: !traceEvent && !isFailed },
+                  ...(isFailed && errorDetail ? [{ id: "error", label: "Error Detail" }] : []),
                 ].map((tab) => (
                   <button
                     key={tab.id}
@@ -627,18 +641,34 @@ function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent
                 <div style={{ fontSize: 10, color: COLORS.textSecondary }}>
                   <div>Model: <b>{activeTrace.trace?.request?.model || "default"}</b></div>
                   <div>Max tokens: <b>{activeTrace.trace?.request?.max_tokens?.toLocaleString()}</b></div>
-                  {traceEvent ? (
+                  {(traceEvent || (isFailed && activeTrace.trace?.response)) ? (
                     <>
-                      <div>Stop reason: <b>{traceEvent.trace?.response?.stop_reason || "?"}</b></div>
+                      <div>Stop reason: <b style={{ color: (traceEvent || activeTrace).trace?.response?.stop_reason === "max_tokens" ? COLORS.red : "inherit" }}>
+                        {(traceEvent || activeTrace).trace?.response?.stop_reason || "?"}
+                      </b></div>
                       <div>
-                        Tokens: <b>{traceEvent.trace?.response?.usage?.input_tokens?.toLocaleString()}</b> in
-                        / <b>{traceEvent.trace?.response?.usage?.output_tokens?.toLocaleString()}</b> out
+                        Tokens: <b>{(traceEvent || activeTrace).trace?.response?.usage?.input_tokens?.toLocaleString()}</b> in
+                        / <b>{(traceEvent || activeTrace).trace?.response?.usage?.output_tokens?.toLocaleString()}</b> out
                       </div>
-                      <div>Duration: <b>{((traceEvent.trace?.timing?.durationMs || 0) / 1000).toFixed(1)}s</b></div>
+                      <div>Duration: <b>{(((traceEvent || activeTrace).trace?.timing?.durationMs || 0) / 1000).toFixed(1)}s</b></div>
+                      {(traceEvent || activeTrace).trace?.parseWarning && (
+                        <div style={{ color: COLORS.orange, marginTop: 4 }}>
+                          Parse warning: {(traceEvent || activeTrace).trace.parseWarning}
+                        </div>
+                      )}
                     </>
+                  ) : isFailed ? (
+                    <div style={{ color: COLORS.red, fontStyle: "italic", marginTop: 4 }}>
+                      LLM call failed before response was received
+                    </div>
                   ) : (
                     <div style={{ color: config.color, fontStyle: "italic", marginTop: 4 }}>
                       Waiting for LLM response...
+                    </div>
+                  )}
+                  {isFailed && errorMessage && (
+                    <div style={{ color: COLORS.red, marginTop: 8, padding: "6px 8px", background: COLORS.red + "08", borderRadius: 3, fontSize: 10, lineHeight: 1.5 }}>
+                      <b>Error:</b> {errorMessage}
                     </div>
                   )}
                 </div>
@@ -654,10 +684,15 @@ function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent
               )}
               {drillTab === "raw" && (
                 traceEvent
-                  ? <MiniCodeBlock content={traceEvent.trace?.response?.raw || "N/A"} maxHeight={250} />
+                  ? <MiniCodeBlock content={traceEvent.trace?.response?.raw || traceEvent.rawOutput || "N/A"} maxHeight={400} />
+                  : isFailed && activeTrace?.rawOutput
+                  ? <MiniCodeBlock content={activeTrace.rawOutput} maxHeight={400} />
                   : <div style={{ fontSize: 10, color: config.color, fontStyle: "italic", padding: "10px 0" }}>
                       Response not yet available — LLM call in progress...
                     </div>
+              )}
+              {drillTab === "error" && errorDetail && (
+                <MiniCodeBlock content={errorDetail} maxHeight={400} />
               )}
             </div>
           )}
@@ -669,7 +704,7 @@ function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent
 
 // ─── Main Component ─────────────────────────────────────────────────────────
 
-export default function ProgressStream({ steps, traceData }) {
+export default function ProgressStream({ steps, traceData, error }) {
   const latest = steps[steps.length - 1];
   const percent = latest?.percent || 0;
 
@@ -677,7 +712,7 @@ export default function ProgressStream({ steps, traceData }) {
   const stageMap = {};
   steps.forEach((s) => { stageMap[s.stage] = s; });
 
-  // Separate completed traces from pending (pre-call) traces
+  // Separate completed/error traces from pending (pre-call) traces
   const traceMap = {};
   const pendingTraceMap = {};
   (traceData || []).forEach((t) => {
@@ -695,6 +730,11 @@ export default function ProgressStream({ steps, traceData }) {
     synthesizing: "synthesizer",
     verifying: "verifier",
   };
+
+  // Map error stage back to STAGE_CONFIG key
+  const failedStageKey = error?.detail?.stage
+    ? Object.entries(traceKeyMap).find(([, v]) => v === error.detail.stage)?.[0]
+    : null;
 
   return (
     <div style={{ marginTop: 32, width: "100%", maxWidth: 560 }}>
@@ -732,8 +772,9 @@ export default function ProgressStream({ steps, traceData }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {STAGE_CONFIG.map((config) => {
           const isDone = !!stageMap[config.doneKey];
-          const isActive = !!stageMap[config.key] && !isDone;
-          const isPending = !stageMap[config.key];
+          const isFailed = config.key === failedStageKey;
+          const isActive = !!stageMap[config.key] && !isDone && !isFailed;
+          const isPending = !stageMap[config.key] && !isFailed;
           const traceStage = traceKeyMap[config.key];
           const traceEvent = traceMap[traceStage];
           const pendingTraceEvent = pendingTraceMap[traceStage];
@@ -749,6 +790,9 @@ export default function ProgressStream({ steps, traceData }) {
               isActive={isActive}
               isDone={isDone}
               isPending={isPending}
+              isFailed={isFailed}
+              errorMessage={isFailed ? (error?.message || error?.detail?.message || "Unknown error") : null}
+              errorDetail={isFailed ? error?.detail : null}
             />
           );
         })}

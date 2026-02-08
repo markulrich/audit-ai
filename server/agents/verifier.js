@@ -41,11 +41,14 @@ function cleanOrphanedRefs(report) {
  *
  * THIS AGENT'S JOB IS TO LOWER CERTAINTY, NOT RAISE IT.
  */
-export async function verify(query, domainProfile, draft, send) {
+export async function verify(query, domainProfile, draft, send, config = {}) {
   const { ticker, companyName } = domainProfile;
+  const methodologyLength = config.methodologyLength || "3-5 sentences";
+  const methodologySources = config.methodologySources || "3-4";
+  const removalThreshold = config.removalThreshold ?? 25;
 
   const params = {
-    max_tokens: 16384,
+    ...(config.verifierModel && { model: config.verifierModel }),
     system: `You are an adversarial fact-checker and research quality auditor. Your job is to find problems with every finding in a draft equity research report.
 
 COMPANY: ${companyName} (${ticker})
@@ -74,7 +77,7 @@ FOR EACH FINDING, YOU MUST:
 
    25-49%: WEAK — Limited sourcing, speculative, or contradicted by stronger evidence.
 
-   <25%:   REMOVE — Finding is unverifiable or likely incorrect. Remove it entirely.
+   <${removalThreshold}%:   REMOVE — Finding is unverifiable or likely incorrect. Remove it entirely.${removalThreshold === 0 ? " (Currently disabled — keep ALL findings regardless of certainty score.)" : ""}
 
 5. For each finding, populate the contraryEvidence array INSIDE the explanation object. Even strong findings should have at least one nuance, caveat, or alternative interpretation. Only truly factual findings from audited filings (95%+) may have an empty contraryEvidence array.
 
@@ -115,7 +118,7 @@ FIELD PLACEMENT IS CRITICAL:
 
 ALSO:
 - Add "overallCertainty" to meta (arithmetic mean of all remaining finding certainty scores, rounded to integer)
-- REMOVE any finding with certainty < 25% from both the findings array AND the section content arrays
+- ${removalThreshold > 0 ? `REMOVE any finding with certainty < ${removalThreshold}% from both the findings array AND the section content arrays` : "Do NOT remove any findings — keep all findings in the report regardless of certainty score"}
 - You may also improve the explanation "text" field to add additional context, correct inaccuracies, or note important caveats
 - Do NOT change the meta, sections structure, or content arrays (except to remove deleted finding refs)
 
@@ -124,7 +127,7 @@ METHODOLOGY OVERVIEW — Add a "methodology" object to meta with this structure:
   "methodology": {
     "explanation": {
       "title": "Report Generation Methodology",
-      "text": "A 3-5 sentence summary of how the report was generated. Mention the date, the overall certainty score, the number of findings, the scoring methodology, and any key corrections you made during verification. Use \\n\\n for paragraph breaks.",
+      "text": "A ${methodologyLength} summary of how the report was generated. Mention the date, the overall certainty score, the number of findings, the scoring methodology, and any key corrections you made during verification. Use \\n\\n for paragraph breaks.",
       "supportingEvidence": [
         { "source": "Primary Source Category", "quote": "What this source contributed to the report", "url": "domain.com" }
       ],
@@ -135,7 +138,7 @@ METHODOLOGY OVERVIEW — Add a "methodology" object to meta with this structure:
     }
   }
 }
-The supportingEvidence should list the 3-4 most important source categories used (e.g., official filings, market data providers, analyst consensus aggregators). The contraryEvidence should note AI limitations and the not-financial-advice disclaimer. The text field should mention any specific corrections you made (e.g., "Revenue figure corrected from $X to $Y based on official filings").
+The supportingEvidence should list the ${methodologySources} most important source categories used (e.g., official filings, market data providers, analyst consensus aggregators). The contraryEvidence should note AI limitations and the not-financial-advice disclaimer. The text field should mention any specific corrections you made (e.g., "Revenue figure corrected from $X to $Y based on official filings").
 
 Return the complete report JSON. No markdown fences. No commentary.`,
     messages: [
@@ -155,7 +158,7 @@ Return the complete report JSON. No markdown fences. No commentary.`,
       trace: {
         request: {
           model: params.model || "(default)",
-          max_tokens: params.max_tokens,
+          max_tokens: "(model max)",
           system: params.system,
           messages: params.messages,
         },
@@ -174,7 +177,8 @@ Return the complete report JSON. No markdown fences. No commentary.`,
     const cleaned = text.replace(/```json\n?|\n?```/g, "").trim();
     const report = JSON.parse(cleaned);
 
-    // Ensure overallCertainty is computed
+    // Ensure meta and overallCertainty exist
+    if (!report.meta) report.meta = {};
     if (!report.meta.overallCertainty && report.findings?.length > 0) {
       report.meta.overallCertainty = Math.round(
         report.findings.reduce((s, f) => s + (f.certainty || 50), 0) /
@@ -209,11 +213,44 @@ Return the complete report JSON. No markdown fences. No commentary.`,
   } catch (e) {
     console.error("Verification agent parse error:", e.message);
     const rawText = response.content?.[0]?.text || "";
-    const match = rawText.match(/\{[\s\S]*\}/);
-    if (match) {
+    // Try to extract a valid JSON object from the response by finding
+    // balanced brace pairs and attempting to parse each one. This avoids
+    // the greedy regex pitfall of matching across unrelated braces.
+    let extracted = null;
+    for (let i = 0; i < rawText.length; i++) {
+      if (rawText[i] !== "{") continue;
+      // Find the matching closing brace using depth counting
+      let depth = 0;
+      let inString = false;
+      let escape = false;
+      for (let j = i; j < rawText.length; j++) {
+        const ch = rawText[j];
+        if (escape) { escape = false; continue; }
+        if (ch === "\\" && inString) { escape = true; continue; }
+        if (ch === '"') { inString = !inString; continue; }
+        if (inString) continue;
+        if (ch === "{") depth++;
+        if (ch === "}") {
+          depth--;
+          if (depth === 0) {
+            try {
+              const candidate = JSON.parse(rawText.slice(i, j + 1));
+              if (!extracted || candidate.findings) extracted = candidate;
+              if (candidate.findings) break;
+            } catch {
+              // Not valid JSON, try the next '{'
+            }
+            break;
+          }
+        }
+      }
+      if (extracted?.findings) break;
+    }
+    if (extracted) {
       try {
-        const report = JSON.parse(match[0]);
-        if (!report.meta?.overallCertainty && report.findings?.length > 0) {
+        const report = extracted;
+        if (!report.meta) report.meta = {};
+        if (!report.meta.overallCertainty && report.findings?.length > 0) {
           report.meta.overallCertainty = Math.round(
             report.findings.reduce((s, f) => s + (f.certainty || 50), 0) /
               report.findings.length
@@ -238,6 +275,7 @@ Return the complete report JSON. No markdown fences. No commentary.`,
         contraryEvidence: f.explanation?.contraryEvidence || [],
       },
     }));
+    if (!draft.meta) draft.meta = {};
     draft.meta.overallCertainty =
       draft.findings.length > 0
         ? Math.round(

@@ -8,11 +8,12 @@ import { tracedCreate } from "../anthropic-client.js";
  *
  * V1: Uses Claude's training knowledge. Future: add Brave/SerpAPI for live search.
  */
-export async function research(query, domainProfile, send) {
+export async function research(query, domainProfile, send, config = {}) {
   const { ticker, companyName, focusAreas } = domainProfile;
+  const evidenceMin = config.evidenceMinItems || 40;
 
   const params = {
-    max_tokens: 12288,
+    ...(config.researcherModel && { model: config.researcherModel }),
     system: `You are a senior financial research analyst gathering evidence for an equity research report.
 
 YOUR ROLE: Collect factual evidence ONLY. Do not synthesize, do not editorialize, do not draw conclusions. You are a data collector.
@@ -45,7 +46,7 @@ EVIDENCE QUALITY STANDARDS:
 - For analyst estimates, specify the number of analysts in the consensus when possible
 - Gather MULTIPLE data points for the same metric from different sources — this enables cross-verification
 
-GATHER AT LEAST 40 EVIDENCE ITEMS covering:
+GATHER AT LEAST ${evidenceMin} EVIDENCE ITEMS covering:
 - Latest quarterly and annual financial results (revenue, EPS, margins, guidance)
 - Stock price data (current price, 52-week range, P/E ratio, market cap)
 - Product announcements and technology roadmap
@@ -61,7 +62,7 @@ Respond with a JSON array of evidence items. JSON only, no markdown.`,
     messages: [
       {
         role: "user",
-        content: `<user_query>\nGather comprehensive evidence for an equity research report on ${companyName} (${ticker}). Be thorough — I need at least 40 data points covering financials, products, competition, risks, and analyst sentiment.\n</user_query>`,
+        content: `<user_query>\nGather comprehensive evidence for an equity research report on ${companyName} (${ticker}). Be thorough — I need at least ${evidenceMin} data points covering financials, products, competition, risks, and analyst sentiment.\n</user_query>`,
       },
     ],
   };
@@ -75,7 +76,7 @@ Respond with a JSON array of evidence items. JSON only, no markdown.`,
       trace: {
         request: {
           model: params.model || "(default)",
-          max_tokens: params.max_tokens,
+          max_tokens: "(model max)",
           system: params.system,
           messages: params.messages,
         },
@@ -94,11 +95,101 @@ Respond with a JSON array of evidence items. JSON only, no markdown.`,
   } catch (e) {
     console.error("Research agent parse error:", e.message);
     const rawText = response.content?.[0]?.text || "";
+    const stopReason = response.stop_reason;
+
+    // If the response was truncated (max_tokens), try repair first since
+    // regex extraction would only find incomplete sub-arrays.
+    if (stopReason === "max_tokens" && rawText.length > 0) {
+      console.warn("Research agent response was truncated at max_tokens, attempting repair");
+      const repaired = repairTruncatedJson(rawText.replace(/```json\n?|\n?```/g, "").trim());
+      if (repaired) {
+        try {
+          const result = JSON.parse(repaired);
+          if (Array.isArray(result)) {
+            return {
+              result,
+              trace: {
+                ...trace,
+                parsedOutput: { evidenceCount: result.length },
+                parseWarning: "Repaired truncated JSON (max_tokens)",
+              },
+            };
+          }
+        } catch (repairErr) {
+          console.error("Research agent truncation repair failed:", repairErr.message);
+        }
+      }
+    }
+
+    // Try to extract a JSON array from surrounding commentary
     const match = rawText.match(/\[[\s\S]*\]/);
     if (match) {
-      const result = JSON.parse(match[0]);
-      return { result, trace: { ...trace, parsedOutput: { evidenceCount: result.length }, parseWarning: "Extracted via regex fallback" } };
+      try {
+        const result = JSON.parse(match[0]);
+        return { result, trace: { ...trace, parsedOutput: { evidenceCount: result.length }, parseWarning: "Extracted via regex fallback" } };
+      } catch (parseErr) {
+        console.error("Research agent regex fallback parse error:", parseErr.message);
+      }
     }
-    throw new Error("Research agent failed to produce valid evidence");
+
+    // Include the raw response snippet in the error for debugging
+    const preview = rawText.slice(0, 300);
+    const error = new Error(
+      `Research agent failed to produce valid JSON array. ` +
+      `Parse error: ${e.message}. ` +
+      `Stop reason: ${stopReason || "unknown"}. ` +
+      `Response preview: ${preview}${rawText.length > 300 ? "..." : ""}`
+    );
+    error.agentTrace = trace;
+    error.rawOutput = rawText;
+    throw error;
   }
+}
+
+/**
+ * Attempt to repair truncated JSON by closing all open brackets and braces.
+ * This handles the common case where the model hits max_tokens mid-output.
+ */
+function repairTruncatedJson(text) {
+  const candidates = [
+    text,
+    // Strip trailing incomplete string (unmatched quote at end)
+    text.replace(/,?\s*"[^"]*$/, ""),
+    // Strip trailing incomplete key-value pair
+    text.replace(/,?\s*"[^"]*"\s*:\s*"?[^"{}[\]]*$/, ""),
+    // Strip back to the last closing brace/bracket
+    text.replace(/[^}\]]*$/, ""),
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate || candidate.length < 2) continue;
+
+    const closers = [];
+    let inString = false;
+    let escape = false;
+
+    for (let i = 0; i < candidate.length; i++) {
+      const ch = candidate[i];
+      if (escape) { escape = false; continue; }
+      if (ch === "\\" && inString) { escape = true; continue; }
+      if (ch === '"') { inString = !inString; continue; }
+      if (inString) continue;
+      if (ch === "{") closers.push("}");
+      else if (ch === "[") closers.push("]");
+      else if (ch === "}" || ch === "]") closers.pop();
+    }
+
+    if (inString) continue;
+    if (closers.length === 0) continue;
+
+    const repaired = candidate + closers.reverse().join("");
+    try {
+      JSON.parse(repaired);
+      return repaired;
+    } catch {
+      // This cut point didn't produce valid JSON, try the next one
+    }
+  }
+
+  return null;
 }
