@@ -1,4 +1,4 @@
-import { client } from "../anthropic-client.js";
+import { createMessage } from "../anthropic-client.js";
 
 /**
  * Research Agent — gathers structured evidence about a topic.
@@ -11,8 +11,7 @@ import { client } from "../anthropic-client.js";
 export async function research(query, domainProfile) {
   const { ticker, companyName, focusAreas } = domainProfile;
 
-  const response = await client.messages.create({
-    model: "claude-sonnet-4-5-20250514",
+  const response = await createMessage({
     max_tokens: 12288,
     system: `You are a senior financial research analyst gathering evidence for an equity research report.
 
