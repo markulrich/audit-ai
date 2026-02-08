@@ -10,6 +10,7 @@ process.on("unhandledRejection", (reason) => {
 import express from "express";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { readFileSync, existsSync } from "fs";
 import { runPipeline } from "./pipeline.js";
 
 import "./anthropic-client.js";
@@ -85,6 +86,22 @@ setInterval(() => {
 if (process.env.NODE_ENV === "production") {
   app.use(express.static(join(__dirname, "..", "dist")));
 }
+
+// ── Example reports endpoint ────────────────────────────────────────────────
+
+app.get("/api/reports/:slug", (req, res) => {
+  const slug = req.params.slug.toLowerCase().replace(/[^a-z0-9_-]/g, "");
+  const filePath = join(__dirname, "example-reports", `${slug}.json`);
+  if (!existsSync(filePath)) {
+    return res.status(404).json({ error: "Report not found" });
+  }
+  try {
+    const data = JSON.parse(readFileSync(filePath, "utf-8"));
+    res.json(data);
+  } catch {
+    res.status(500).json({ error: "Failed to read report" });
+  }
+});
 
 // ── SSE endpoint: generate an explainable report ────────────────────────────
 

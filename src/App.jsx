@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import QueryInput from "./components/QueryInput.jsx";
 import ProgressStream from "./components/ProgressStream.jsx";
 import Report from "./components/Report.jsx";
@@ -44,6 +44,28 @@ export default function App() {
   const [report, setReport] = useState(null);
   const [error, setError] = useState(null);
   const abortRef = useRef(null);
+
+  // Load example report when URL matches /reports/:slug
+  useEffect(() => {
+    const match = window.location.pathname.match(/^\/reports\/([a-zA-Z0-9_-]+)$/);
+    if (!match) return;
+    const slug = match[1];
+    setState("loading");
+    setProgress([{ stage: "loading", message: "Loading example report...", percent: 50 }]);
+    fetch(`/api/reports/${slug}`)
+      .then((res) => {
+        if (!res.ok) throw new Error("Report not found");
+        return res.json();
+      })
+      .then((data) => {
+        setReport(data);
+        setState("done");
+      })
+      .catch((err) => {
+        setError(err.message);
+        setState("error");
+      });
+  }, []);
 
   const handleGenerate = async (query) => {
     // Abort any in-flight request
@@ -171,6 +193,10 @@ export default function App() {
     setProgress([]);
     setReport(null);
     setError(null);
+    // If we were viewing an example report, navigate back to home
+    if (window.location.pathname !== "/") {
+      window.history.pushState(null, "", "/");
+    }
   };
 
   if (state === "done" && report) {
