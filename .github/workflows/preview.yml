@@ -44,6 +44,16 @@ jobs:
           flyctl apps list | grep -q "$PREVIEW_APP" || \
             flyctl apps create "$PREVIEW_APP" --org personal
 
+      - name: Provision Tigris storage (if needed)
+        run: |
+          # `fly storage create` automatically sets BUCKET_NAME, AWS_ENDPOINT_URL_S3,
+          # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_REGION on the app.
+          if flyctl storage list --app "$PREVIEW_APP" 2>/dev/null | grep -q .; then
+            echo "Storage already provisioned, skipping."
+          else
+            flyctl storage create --app "$PREVIEW_APP" --name "${PREVIEW_APP}-reports"
+          fi
+
       - name: Set secrets on preview app
         run: |
           flyctl secrets set ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \

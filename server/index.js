@@ -11,6 +11,7 @@ import express from "express";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { runPipeline } from "./pipeline.js";
+import { publishReport, getReport } from "./storage.js";
 
 import "./anthropic-client.js";
 
@@ -165,6 +166,42 @@ app.post("/api/generate", rateLimit, async (req, res) => {
   } finally {
     clearInterval(heartbeat);
     if (!res.writableEnded) res.end();
+  }
+});
+
+// ── Publish / retrieve reports ──────────────────────────────────────────────
+
+app.post("/api/reports/publish", async (req, res) => {
+  const { report, slug } = req.body;
+
+  if (!report || typeof report !== "object" || !report.meta || !Array.isArray(report.sections) || !Array.isArray(report.findings)) {
+    return res.status(400).json({ error: "Invalid report payload" });
+  }
+
+  try {
+    const result = await publishReport(report, slug || undefined);
+    res.json(result);
+  } catch (err) {
+    console.error("Publish error:", err);
+    res.status(500).json({ error: err.message || "Failed to publish report" });
+  }
+});
+
+app.get("/api/reports/:slug", async (req, res) => {
+  const { slug } = req.params;
+  const version = req.query.v ? parseInt(req.query.v, 10) : undefined;
+
+  if (!slug || !/^[a-z0-9-]+$/.test(slug)) {
+    return res.status(400).json({ error: "Invalid slug" });
+  }
+
+  try {
+    const data = await getReport(slug, version);
+    if (!data) return res.status(404).json({ error: "Report not found" });
+    res.json(data);
+  } catch (err) {
+    console.error("Retrieve error:", err);
+    res.status(500).json({ error: "Failed to retrieve report" });
   }
 });
 
