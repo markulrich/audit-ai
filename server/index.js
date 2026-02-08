@@ -153,6 +153,6 @@ if (process.env.NODE_ENV === "production") {
   });
 }
 
-app.listen(PORT, () => {
-  console.log(`DoublyAI server running on http://localhost:${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`DoublyAI server running on http://0.0.0.0:${PORT}`);
 });
