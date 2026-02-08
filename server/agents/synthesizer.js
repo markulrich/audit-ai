@@ -130,7 +130,13 @@ Respond with JSON only. No markdown fences. No commentary.`,
     console.error("Synthesis agent parse error:", e.message);
     const rawText = response.content?.[0]?.text || "";
     const match = rawText.match(/\{[\s\S]*\}/);
-    if (match) return JSON.parse(match[0]);
+    if (match) {
+      try {
+        return JSON.parse(match[0]);
+      } catch (parseErr) {
+        console.error("Synthesis agent regex fallback parse error:", parseErr.message);
+      }
+    }
     throw new Error("Synthesis agent failed to produce valid report");
   }
 }

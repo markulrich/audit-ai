@@ -1,19 +1,19 @@
 import Anthropic from "@anthropic-ai/sdk";
 
 if (!process.env.ANTHROPIC_API_KEY) {
-  console.error(
-    "FATAL: ANTHROPIC_API_KEY environment variable is not set.\n" +
-    "Copy .env.example to .env and add your key:\n" +
-    "  cp .env.example .env"
+  console.warn(
+    "WARNING: ANTHROPIC_API_KEY is not set. " +
+    "The app will serve the frontend but API calls will fail."
   );
-  process.exit(1);
 }
 
-export const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-  timeout: 120_000,
-  maxRetries: 2,
-});
+export const client = process.env.ANTHROPIC_API_KEY
+  ? new Anthropic({
+      apiKey: process.env.ANTHROPIC_API_KEY,
+      timeout: 120_000,
+      maxRetries: 2,
+    })
+  : null;
 
 // For testing, use haiku to save $, but in prod use sonnet or opus.
 export const ANTHROPIC_MODEL =
@@ -33,6 +33,12 @@ function isModelNotFound(err) {
 }
 
 export async function createMessage(params) {
+  if (!client) {
+    const err = new Error("ANTHROPIC_API_KEY is not configured.");
+    err.status = 401;
+    err.keyMissing = true;
+    throw err;
+  }
   const requestedModel = params.model;
   const candidateModels = [
     ...new Set([requestedModel, ...MODEL_FALLBACKS].filter(Boolean)),

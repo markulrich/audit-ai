@@ -223,7 +223,25 @@ export default function App() {
 
       {/* Progress */}
       {state === "loading" && (
-        <ProgressStream steps={progress} />
+        <>
+          <ProgressStream steps={progress} />
+          <button
+            onClick={handleReset}
+            style={{
+              marginTop: 16,
+              padding: "6px 20px",
+              fontSize: 12,
+              fontWeight: 600,
+              border: "1px solid #e2e4ea",
+              borderRadius: 4,
+              background: "#fff",
+              cursor: "pointer",
+              color: "#555770",
+            }}
+          >
+            Cancel
+          </button>
+        </>
       )}
 
       {/* Error */}

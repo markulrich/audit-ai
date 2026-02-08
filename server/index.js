@@ -1,9 +1,17 @@
+process.on("uncaughtException", (err) => {
+  console.error("[FATAL] Uncaught exception:", err.message, err.stack);
+  process.exit(1);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[FATAL] Unhandled rejection:", reason);
+  process.exit(1);
+});
+
 import express from "express";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { runPipeline } from "./pipeline.js";
 
-// Validate API key at startup (exits if missing)
 import "./anthropic-client.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -131,8 +139,10 @@ app.post("/api/generate", rateLimit, async (req, res) => {
     if (!aborted) {
       // Sanitize error message — never leak internals
       const safeMessage =
-        err.status === 401 || err.status === 403
-          ? "API authentication failed. Check your ANTHROPIC_API_KEY."
+        err.keyMissing
+          ? "ANTHROPIC_API_KEY is not set. Configure it on the server to enable report generation."
+          : err.status === 401 || err.status === 403
+          ? "ANTHROPIC_API_KEY is set but was rejected by the API. Check that it is valid."
           : err.status === 429
           ? "API rate limit hit. Please wait a minute and try again."
           : err.status >= 500
@@ -153,6 +163,9 @@ if (process.env.NODE_ENV === "production") {
   });
 }
 
-app.listen(PORT, () => {
-  console.log(`DoublyAI server running on http://localhost:${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`DoublyAI server running on http://0.0.0.0:${PORT}`);
+}).on("error", (err) => {
+  console.error("LISTEN ERROR:", err.message, err.code);
+  process.exit(1);
 });
