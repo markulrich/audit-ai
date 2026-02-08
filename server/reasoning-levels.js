@@ -25,7 +25,7 @@ export const REASONING_LEVELS = {
     verifierMaxTokens: 3000,
 
     // Researcher
-    evidenceMinItems: 5,
+    evidenceMinItems: 2,
 
     // Synthesizer
     totalFindings: "3-5",
