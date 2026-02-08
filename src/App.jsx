@@ -168,7 +168,27 @@ export default function App() {
       }
     } catch (err) {
       if (err.name === "AbortError") return; // User cancelled — do nothing
-      setError({ message: err.message, detail: null });
+
+      // Browser gives unhelpful messages like "Load failed" or "Failed to fetch"
+      // when the connection drops (e.g., server restart, network issue).
+      const isNetworkError =
+        err instanceof TypeError &&
+        /load failed|failed to fetch|network/i.test(err.message);
+
+      const message = isNetworkError
+        ? "Connection to the server was lost — the server may have restarted or your network dropped. Please try again."
+        : err.message || "An unknown error occurred.";
+
+      setError({
+        message,
+        detail: {
+          originalError: err.message,
+          type: err.constructor?.name || "Error",
+          hint: isNetworkError
+            ? "This usually means the server process restarted mid-request. Your query was not completed."
+            : null,
+        },
+      });
       setState("error");
     }
   };
