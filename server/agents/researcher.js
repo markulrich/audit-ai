@@ -8,11 +8,16 @@ import { tracedCreate } from "../anthropic-client.js";
  *
  * V1: Uses Claude's training knowledge. Future: add Brave/SerpAPI for live search.
  */
-export async function research(query, domainProfile, send) {
+export async function research(query, domainProfile, send, reasoningConfig = {}) {
   const { ticker, companyName, focusAreas } = domainProfile;
+  const cfg = reasoningConfig.researcher || {};
+  const model = reasoningConfig.model;
+  const evidenceTarget = cfg.evidenceTarget || 40;
+  const evidencePrompt = cfg.evidencePrompt || "AT LEAST 40";
 
   const params = {
-    max_tokens: 12288,
+    ...(model ? { model } : {}),
+    max_tokens: cfg.maxTokens || 12288,
     system: `You are a senior financial research analyst gathering evidence for an equity research report.
 
 YOUR ROLE: Collect factual evidence ONLY. Do not synthesize, do not editorialize, do not draw conclusions. You are a data collector.
@@ -45,7 +50,7 @@ EVIDENCE QUALITY STANDARDS:
 - For analyst estimates, specify the number of analysts in the consensus when possible
 - Gather MULTIPLE data points for the same metric from different sources — this enables cross-verification
 
-GATHER AT LEAST 40 EVIDENCE ITEMS covering:
+GATHER ${evidencePrompt} EVIDENCE ITEMS covering:
 - Latest quarterly and annual financial results (revenue, EPS, margins, guidance)
 - Stock price data (current price, 52-week range, P/E ratio, market cap)
 - Product announcements and technology roadmap
@@ -61,7 +66,7 @@ Respond with a JSON array of evidence items. JSON only, no markdown.`,
     messages: [
       {
         role: "user",
-        content: `<user_query>\nGather comprehensive evidence for an equity research report on ${companyName} (${ticker}). Be thorough — I need at least 40 data points covering financials, products, competition, risks, and analyst sentiment.\n</user_query>`,
+        content: `<user_query>\nGather comprehensive evidence for an equity research report on ${companyName} (${ticker}). Be thorough — I need at least ${evidenceTarget} data points covering financials, products, competition, risks, and analyst sentiment.\n</user_query>`,
       },
     ],
   };

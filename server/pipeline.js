@@ -3,6 +3,7 @@ import { research } from "./agents/researcher.js";
 import { synthesize } from "./agents/synthesizer.js";
 import { verify } from "./agents/verifier.js";
 import { ANTHROPIC_MODEL } from "./anthropic-client.js";
+import { getReasoningConfig } from "./reasoning-levels.js";
 
 /**
  * Runs the full DoublyAI pipeline with SSE progress updates.
@@ -17,15 +18,17 @@ import { ANTHROPIC_MODEL } from "./anthropic-client.js";
  * @param {Function} send - SSE event sender: send(eventName, data)
  * @param {Function} isAborted - Returns true if the client disconnected
  */
-export async function runPipeline(query, send, isAborted = () => false) {
+export async function runPipeline(query, send, isAborted = () => false, reasoningLevel = "medium") {
   const pipelineStartTime = Date.now();
+  const reasoningConfig = getReasoningConfig(reasoningLevel);
+  const modelLabel = reasoningConfig.model || ANTHROPIC_MODEL;
 
   // ── Stage 1: Classify ───────────────────────────────────────────────────────
   send("progress", {
     stage: "classifying",
     message: "Analyzing your query...",
     percent: 5,
-    detail: `Sending query to ${ANTHROPIC_MODEL} to identify domain, ticker, and focus areas`,
+    detail: `Sending query to ${modelLabel} to identify domain, ticker, and focus areas`,
     substeps: [
       { text: "Extracting company name and ticker symbol", status: "active" },
       { text: "Identifying research domain", status: "pending" },
@@ -34,7 +37,7 @@ export async function runPipeline(query, send, isAborted = () => false) {
   });
 
   const { result: domainProfile, trace: classifierTrace } =
-    await classifyDomain(query, send);
+    await classifyDomain(query, send, reasoningConfig);
   if (isAborted()) return;
 
   send("progress", {
@@ -44,7 +47,7 @@ export async function runPipeline(query, send, isAborted = () => false) {
     domainProfile,
     detail: `Domain: ${domainProfile.domainLabel} | Ticker: ${domainProfile.ticker} | Focus: ${domainProfile.focusAreas.join(", ") || "general"}`,
     stats: {
-      model: classifierTrace.request?.model || ANTHROPIC_MODEL,
+      model: classifierTrace.request?.model || modelLabel,
       durationMs: classifierTrace.timing?.durationMs,
       inputTokens: classifierTrace.response?.usage?.input_tokens,
       outputTokens: classifierTrace.response?.usage?.output_tokens,
@@ -63,7 +66,7 @@ export async function runPipeline(query, send, isAborted = () => false) {
     stage: "researching",
     message: `Gathering evidence on ${domainProfile.companyName} (${domainProfile.ticker})...`,
     percent: 15,
-    detail: `Collecting 40+ data points across financials, products, competition, risks, and analyst sentiment. Using ${ANTHROPIC_MODEL} with 12,288 max output tokens.`,
+    detail: `Collecting ${reasoningConfig.researcher?.evidenceTarget || 40}+ data points across financials, products, competition, risks, and analyst sentiment. Using ${modelLabel} with ${(reasoningConfig.researcher?.maxTokens || 12288).toLocaleString()} max output tokens.`,
     substeps: [
       { text: "SEC filings and earnings releases", status: "active" },
       { text: "Analyst consensus and price targets", status: "active" },
@@ -77,7 +80,8 @@ export async function runPipeline(query, send, isAborted = () => false) {
   const { result: evidence, trace: researcherTrace } = await research(
     query,
     domainProfile,
-    send
+    send,
+    reasoningConfig
   );
   if (isAborted()) return;
 
@@ -98,7 +102,7 @@ export async function runPipeline(query, send, isAborted = () => false) {
       .map(([cat, count]) => `${cat.replace(/_/g, " ")}: ${count}`)
       .join(" | "),
     stats: {
-      model: researcherTrace.request?.model || ANTHROPIC_MODEL,
+      model: researcherTrace.request?.model || modelLabel,
       durationMs: researcherTrace.timing?.durationMs,
       inputTokens: researcherTrace.response?.usage?.input_tokens,
       outputTokens: researcherTrace.response?.usage?.output_tokens,
@@ -125,7 +129,7 @@ export async function runPipeline(query, send, isAborted = () => false) {
     stage: "synthesizing",
     message: "Drafting findings and report structure...",
     percent: 50,
-    detail: `Transforming ${Array.isArray(evidence) ? evidence.length : 0} evidence items into structured equity research report with ${ANTHROPIC_MODEL}. Target: 25-35 findings across 8 sections.`,
+    detail: `Transforming ${Array.isArray(evidence) ? evidence.length : 0} evidence items into structured equity research report with ${modelLabel}. Target: ${reasoningConfig.synthesizer?.findingsTotal || "25-35"} findings across 8 sections.`,
     substeps: [
       { text: "Investment thesis", status: "active" },
       { text: "Price action and financial performance", status: "active" },
@@ -139,7 +143,8 @@ export async function runPipeline(query, send, isAborted = () => false) {
     query,
     domainProfile,
     evidence,
-    send
+    send,
+    reasoningConfig
   );
   if (isAborted()) return;
 
@@ -157,7 +162,7 @@ export async function runPipeline(query, send, isAborted = () => false) {
     percent: 70,
     detail: sectionBreakdown.join(" | "),
     stats: {
-      model: synthesizerTrace.request?.model || ANTHROPIC_MODEL,
+      model: synthesizerTrace.request?.model || modelLabel,
       durationMs: synthesizerTrace.timing?.durationMs,
       inputTokens: synthesizerTrace.response?.usage?.input_tokens,
       outputTokens: synthesizerTrace.response?.usage?.output_tokens,
@@ -179,13 +184,13 @@ export async function runPipeline(query, send, isAborted = () => false) {
     stage: "verifying",
     message: `Adversarially verifying ${draft.findings?.length || 0} findings...`,
     percent: 75,
-    detail: `Challenging every claim against known facts. Assigning certainty scores (25-99%), adding contrary evidence, removing unverifiable findings (<25%). Using ${ANTHROPIC_MODEL}.`,
+    detail: `Challenging every claim against known facts. Assigning certainty scores (${reasoningConfig.verifier?.certaintyCutoff || 25}-99%), adding contrary evidence, removing unverifiable findings (<${reasoningConfig.verifier?.certaintyCutoff || 25}%). Using ${modelLabel}.`,
     substeps: [
       { text: "Cross-checking financial numbers", status: "active" },
       { text: "Validating dates and fiscal calendars", status: "active" },
       { text: "Scoring source authority", status: "active" },
       { text: "Finding contradictions and caveats", status: "active" },
-      { text: "Removing weak findings (<25% certainty)", status: "active" },
+      { text: `Removing weak findings (<${reasoningConfig.verifier?.certaintyCutoff || 25}% certainty)`, status: "active" },
     ],
   });
 
@@ -193,7 +198,8 @@ export async function runPipeline(query, send, isAborted = () => false) {
     query,
     domainProfile,
     draft,
-    send
+    send,
+    reasoningConfig
   );
   if (isAborted()) return;
 
@@ -221,7 +227,7 @@ export async function runPipeline(query, send, isAborted = () => false) {
     percent: 95,
     detail: `High (90%+): ${certaintyBuckets.high} | Moderate (70-89%): ${certaintyBuckets.moderate} | Mixed (50-69%): ${certaintyBuckets.mixed} | Weak (<50%): ${certaintyBuckets.weak}${removedCount > 0 ? ` | Removed: ${removedCount}` : ""}`,
     stats: {
-      model: verifierTrace.request?.model || ANTHROPIC_MODEL,
+      model: verifierTrace.request?.model || modelLabel,
       durationMs: verifierTrace.timing?.durationMs,
       inputTokens: verifierTrace.response?.usage?.input_tokens,
       outputTokens: verifierTrace.response?.usage?.output_tokens,
@@ -250,6 +256,8 @@ export async function runPipeline(query, send, isAborted = () => false) {
     },
     intermediateOutput: {
       query,
+      reasoningLevel,
+      model: modelLabel,
       totalStages: 4,
       totalFindings: findingsCount,
       avgCertainty,

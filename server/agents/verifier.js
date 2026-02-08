@@ -41,11 +41,16 @@ function cleanOrphanedRefs(report) {
  *
  * THIS AGENT'S JOB IS TO LOWER CERTAINTY, NOT RAISE IT.
  */
-export async function verify(query, domainProfile, draft, send) {
+export async function verify(query, domainProfile, draft, send, reasoningConfig = {}) {
   const { ticker, companyName } = domainProfile;
+  const cfg = reasoningConfig.verifier || {};
+  const model = reasoningConfig.model;
+  const methodologyTextLength = cfg.methodologyTextLength || "3-5 sentences";
+  const certaintyCutoff = cfg.certaintyCutoff || 25;
 
   const params = {
-    max_tokens: 16384,
+    ...(model ? { model } : {}),
+    max_tokens: cfg.maxTokens || 16384,
     system: `You are an adversarial fact-checker and research quality auditor. Your job is to find problems with every finding in a draft equity research report.
 
 COMPANY: ${companyName} (${ticker})
@@ -74,7 +79,7 @@ FOR EACH FINDING, YOU MUST:
 
    25-49%: WEAK — Limited sourcing, speculative, or contradicted by stronger evidence.
 
-   <25%:   REMOVE — Finding is unverifiable or likely incorrect. Remove it entirely.
+   <${certaintyCutoff}%:   REMOVE — Finding is unverifiable or likely incorrect. Remove it entirely.
 
 5. For each finding, populate the contraryEvidence array INSIDE the explanation object. Even strong findings should have at least one nuance, caveat, or alternative interpretation. Only truly factual findings from audited filings (95%+) may have an empty contraryEvidence array.
 
@@ -115,7 +120,7 @@ FIELD PLACEMENT IS CRITICAL:
 
 ALSO:
 - Add "overallCertainty" to meta (arithmetic mean of all remaining finding certainty scores, rounded to integer)
-- REMOVE any finding with certainty < 25% from both the findings array AND the section content arrays
+- REMOVE any finding with certainty < ${certaintyCutoff}% from both the findings array AND the section content arrays
 - You may also improve the explanation "text" field to add additional context, correct inaccuracies, or note important caveats
 - Do NOT change the meta, sections structure, or content arrays (except to remove deleted finding refs)
 
@@ -124,7 +129,7 @@ METHODOLOGY OVERVIEW — Add a "methodology" object to meta with this structure:
   "methodology": {
     "explanation": {
       "title": "Report Generation Methodology",
-      "text": "A 3-5 sentence summary of how the report was generated. Mention the date, the overall certainty score, the number of findings, the scoring methodology, and any key corrections you made during verification. Use \\n\\n for paragraph breaks.",
+      "text": "A ${methodologyTextLength} summary of how the report was generated. Mention the date, the overall certainty score, the number of findings, the scoring methodology, and any key corrections you made during verification. Use \\n\\n for paragraph breaks.",
       "supportingEvidence": [
         { "source": "Primary Source Category", "quote": "What this source contributed to the report", "url": "domain.com" }
       ],

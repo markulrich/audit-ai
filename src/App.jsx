@@ -2,6 +2,7 @@ import { useState, useRef } from "react";
 import QueryInput from "./components/QueryInput.jsx";
 import ProgressStream from "./components/ProgressStream.jsx";
 import Report from "./components/Report.jsx";
+import ReasoningLevelSelector from "./components/ReasoningLevelSelector.jsx";
 
 function isReportPayload(value) {
   return (
@@ -44,6 +45,7 @@ export default function App() {
   const [report, setReport] = useState(null);
   const [error, setError] = useState(null);
   const [traceData, setTraceData] = useState([]);
+  const [reasoningLevel, setReasoningLevel] = useState("medium");
   const abortRef = useRef(null);
 
   const handleGenerate = async (query) => {
@@ -66,7 +68,7 @@ export default function App() {
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query }),
+        body: JSON.stringify({ query, reasoningLevel }),
         signal: controller.signal,
       });
 
@@ -228,6 +230,17 @@ export default function App() {
         onSubmit={handleGenerate}
         disabled={state === "loading"}
       />
+
+      {/* Reasoning Level Selector — visible before and during execution */}
+      {(state === "idle" || state === "loading") && (
+        <div style={{ marginTop: 12 }}>
+          <ReasoningLevelSelector
+            value={reasoningLevel}
+            onChange={setReasoningLevel}
+            disabled={state === "loading"}
+          />
+        </div>
+      )}
 
       {/* Progress */}
       {state === "loading" && (
