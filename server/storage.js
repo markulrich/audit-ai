@@ -5,8 +5,12 @@
  *   reports/{slug}/meta.json   – slug metadata + current version pointer
  *   reports/{slug}/v{N}.json   – full report snapshot for version N
  *
- * When BUCKET_NAME and AWS_ENDPOINT_URL_S3 are not set (local dev),
+ * When BUCKET_NAME / AWS_ENDPOINT_URL_S3 are not set (local dev),
  * falls back to the local filesystem under .data/reports/.
+ *
+ * On Fly.io, `fly storage create` automatically sets BUCKET_NAME,
+ * AWS_ENDPOINT_URL_S3, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
+ * and AWS_REGION as secrets on the app — no manual config needed.
  */
 
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
