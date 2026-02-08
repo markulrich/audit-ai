@@ -259,7 +259,7 @@ export default function App() {
       {/* Progress */}
       {state === "loading" && (
         <>
-          <ProgressStream steps={progress} traceData={traceData} />
+          <ProgressStream steps={progress} traceData={traceData} error={error} />
           <button
             onClick={handleReset}
             style={{
@@ -284,7 +284,7 @@ export default function App() {
         <>
           {/* Show all intermediate progress/trace data accumulated before error */}
           {progress.length > 0 && (
-            <ProgressStream steps={progress} traceData={traceData} />
+            <ProgressStream steps={progress} traceData={traceData} error={error} />
           )}
           <div
             style={{
