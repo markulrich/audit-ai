@@ -232,7 +232,7 @@ export default function App() {
       {/* Progress */}
       {state === "loading" && (
         <>
-          <ProgressStream steps={progress} />
+          <ProgressStream steps={progress} traceData={traceData} />
           <button
             onClick={handleReset}
             style={{
