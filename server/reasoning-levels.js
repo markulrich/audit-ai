@@ -1,0 +1,125 @@
+/**
+ * Reasoning level presets that control every tunable parameter in the pipeline.
+ *
+ * X-Light: Minimum everything — for fast testing
+ * Light:   Reduced scope, still uses haiku
+ * Heavy:   Full production quality with sonnet
+ * X-Heavy: Maximum depth with opus
+ */
+
+export const REASONING_LEVELS = {
+  "x-light": {
+    label: "X-Light",
+    description: "Fastest — minimal output for testing",
+
+    // Models
+    classifierModel: undefined, // use default (haiku)
+    researcherModel: undefined,
+    synthesizerModel: undefined,
+    verifierModel: undefined,
+
+    // Max tokens
+    classifierMaxTokens: 256,
+    researcherMaxTokens: 4096,
+    synthesizerMaxTokens: 4096,
+    verifierMaxTokens: 4096,
+
+    // Researcher
+    evidenceMinItems: 10,
+
+    // Synthesizer
+    totalFindings: "5-8",
+    findingsPerSection: "1-2",
+    supportingEvidenceMin: 1,
+    explanationLength: "1 sentence",
+    keyStatsCount: 3,
+
+    // Verifier
+    methodologyLength: "1-2 sentences",
+    methodologySources: "1-2",
+  },
+
+  light: {
+    label: "Light",
+    description: "Faster — reduced scope, lower cost",
+
+    classifierModel: undefined,
+    researcherModel: undefined,
+    synthesizerModel: undefined,
+    verifierModel: undefined,
+
+    classifierMaxTokens: 512,
+    researcherMaxTokens: 8192,
+    synthesizerMaxTokens: 8192,
+    verifierMaxTokens: 8192,
+
+    evidenceMinItems: 20,
+
+    totalFindings: "12-18",
+    findingsPerSection: "2-3",
+    supportingEvidenceMin: 2,
+    explanationLength: "1-2 sentences",
+    keyStatsCount: 4,
+
+    methodologyLength: "2-3 sentences",
+    methodologySources: "2-3",
+  },
+
+  heavy: {
+    label: "Heavy",
+    description: "Full quality — production grade",
+
+    classifierModel: undefined,
+    researcherModel: undefined,
+    synthesizerModel: "claude-sonnet-4-5",
+    verifierModel: "claude-sonnet-4-5",
+
+    classifierMaxTokens: 512,
+    researcherMaxTokens: 12288,
+    synthesizerMaxTokens: 16384,
+    verifierMaxTokens: 16384,
+
+    evidenceMinItems: 40,
+
+    totalFindings: "25-35",
+    findingsPerSection: "3-5",
+    supportingEvidenceMin: 3,
+    explanationLength: "2-4 sentences",
+    keyStatsCount: 6,
+
+    methodologyLength: "3-5 sentences",
+    methodologySources: "3-4",
+  },
+
+  "x-heavy": {
+    label: "X-Heavy",
+    description: "Maximum depth — opus, most thorough",
+
+    classifierModel: "claude-sonnet-4-5",
+    researcherModel: "claude-opus-4-6",
+    synthesizerModel: "claude-opus-4-6",
+    verifierModel: "claude-opus-4-6",
+
+    classifierMaxTokens: 1024,
+    researcherMaxTokens: 16384,
+    synthesizerMaxTokens: 16384,
+    verifierMaxTokens: 16384,
+
+    evidenceMinItems: 60,
+
+    totalFindings: "35-50",
+    findingsPerSection: "4-7",
+    supportingEvidenceMin: 5,
+    explanationLength: "3-6 sentences",
+    keyStatsCount: 8,
+
+    methodologyLength: "5-8 sentences",
+    methodologySources: "4-6",
+  },
+};
+
+export const DEFAULT_REASONING_LEVEL = "heavy";
+
+export function getReasoningConfig(level) {
+  return REASONING_LEVELS[level] || REASONING_LEVELS[DEFAULT_REASONING_LEVEL];
+}

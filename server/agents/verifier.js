@@ -41,12 +41,14 @@ function cleanOrphanedRefs(report) {
  *
  * THIS AGENT'S JOB IS TO LOWER CERTAINTY, NOT RAISE IT.
  */
-export async function verify(query, domainProfile, draft, send) {
+export async function verify(query, domainProfile, draft, send, config = {}) {
   const { ticker, companyName } = domainProfile;
+  const methodologyLength = config.methodologyLength || "3-5 sentences";
+  const methodologySources = config.methodologySources || "3-4";
 
   const params = {
-    model: "claude-sonnet-4-5",
-    max_tokens: 16384,
+    ...(config.verifierModel && { model: config.verifierModel }),
+    max_tokens: config.verifierMaxTokens || 16384,
     system: `You are an adversarial fact-checker and research quality auditor. Your job is to find problems with every finding in a draft equity research report.
 
 COMPANY: ${companyName} (${ticker})
@@ -125,7 +127,7 @@ METHODOLOGY OVERVIEW — Add a "methodology" object to meta with this structure:
   "methodology": {
     "explanation": {
       "title": "Report Generation Methodology",
-      "text": "A 3-5 sentence summary of how the report was generated. Mention the date, the overall certainty score, the number of findings, the scoring methodology, and any key corrections you made during verification. Use \\n\\n for paragraph breaks.",
+      "text": "A ${methodologyLength} summary of how the report was generated. Mention the date, the overall certainty score, the number of findings, the scoring methodology, and any key corrections you made during verification. Use \\n\\n for paragraph breaks.",
       "supportingEvidence": [
         { "source": "Primary Source Category", "quote": "What this source contributed to the report", "url": "domain.com" }
       ],
@@ -136,7 +138,7 @@ METHODOLOGY OVERVIEW — Add a "methodology" object to meta with this structure:
     }
   }
 }
-The supportingEvidence should list the 3-4 most important source categories used (e.g., official filings, market data providers, analyst consensus aggregators). The contraryEvidence should note AI limitations and the not-financial-advice disclaimer. The text field should mention any specific corrections you made (e.g., "Revenue figure corrected from $X to $Y based on official filings").
+The supportingEvidence should list the ${methodologySources} most important source categories used (e.g., official filings, market data providers, analyst consensus aggregators). The contraryEvidence should note AI limitations and the not-financial-advice disclaimer. The text field should mention any specific corrections you made (e.g., "Revenue figure corrected from $X to $Y based on official filings").
 
 Return the complete report JSON. No markdown fences. No commentary.`,
     messages: [

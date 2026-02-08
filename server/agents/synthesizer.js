@@ -8,12 +8,34 @@ import { tracedCreate } from "../anthropic-client.js";
  *   - Sections with content flow (interleaved findings and connecting text)
  *   - Findings with initial explanations and supporting evidence
  */
-export async function synthesize(query, domainProfile, evidence, send) {
+export async function synthesize(query, domainProfile, evidence, send, config = {}) {
   const { ticker, companyName } = domainProfile;
 
+  const totalFindings = config.totalFindings || "25-35";
+  const findingsPerSection = config.findingsPerSection || "3-5";
+  const supportingEvidenceMin = config.supportingEvidenceMin || 3;
+  const explanationLength = config.explanationLength || "2-4 sentences";
+  const keyStatsCount = config.keyStatsCount || 6;
+
+  // Build keyStats example dynamically based on count
+  const keyStatsBase = [
+    '{ "label": "Price Target", "value": "$XXX" }',
+    '{ "label": "Current Price", "value": "$XXX.XX" }',
+    '{ "label": "Upside", "value": "~XX%" }',
+    '{ "label": "Market Cap", "value": "$X.XT" }',
+    '{ "label": "P/E (TTM)", "value": "XXx" }',
+    '{ "label": "FY26E EPS", "value": "$X.XX" }',
+    '{ "label": "Revenue Growth", "value": "XX%" }',
+    '{ "label": "Gross Margin", "value": "XX%" }',
+  ];
+  const keyStatsExample = keyStatsBase.slice(0, keyStatsCount).join(",\n      ");
+
+  // Derive max finding ID from total findings range
+  const maxFinding = parseInt(totalFindings.split("-").pop(), 10) || 30;
+
   const params = {
-    model: "claude-sonnet-4-5",
-    max_tokens: 16384,
+    ...(config.synthesizerModel && { model: config.synthesizerModel }),
+    max_tokens: config.synthesizerMaxTokens || 16384,
     system: `You are a senior equity research analyst at a top-tier investment bank (Morgan Stanley, JPMorgan, Goldman Sachs caliber).
 
 You are writing an initiating coverage report on ${companyName} (${ticker}).
@@ -36,12 +58,7 @@ YOUR TASK: Given the evidence below, produce a structured JSON report. You MUST 
     "exchange": "NASDAQ",
     "sector": "...",
     "keyStats": [
-      { "label": "Price Target", "value": "$XXX" },
-      { "label": "Current Price", "value": "$XXX.XX" },
-      { "label": "Upside", "value": "~XX%" },
-      { "label": "Market Cap", "value": "$X.XT" },
-      { "label": "P/E (TTM)", "value": "XXx" },
-      { "label": "FY26E EPS", "value": "$X.XX" }
+      ${keyStatsExample}
     ]
   },
   "sections": [
@@ -92,18 +109,18 @@ RULES FOR FINDINGS:
 1. Each finding is ONE declarative sentence — a specific, verifiable claim with numbers
 2. Findings are sentence fragments that FLOW NATURALLY when woven into the content array. Some may be complete sentences, others may be clauses (e.g., "with a market capitalization of approximately $4.5 trillion") that connect via text nodes
 3. Findings must be based on the evidence provided — do not invent data
-4. Each finding must have at least 3 supporting evidence items from the provided evidence (more is better)
+4. Each finding must have at least ${supportingEvidenceMin} supporting evidence items from the provided evidence (more is better)
 5. Set contraryEvidence to an empty array [] — the Verification Agent will populate it later
 6. The explanation "title" should be 2-5 words summarizing the claim (e.g., "Q4 Revenue Figure", "Market Share Estimate")
-7. The explanation "text" should be 2-4 sentences providing context, significance, and nuance beyond the finding itself
-8. Produce 25-35 findings total, distributed across all sections
-9. Use sequential IDs: f1, f2, f3, ... f30
+7. The explanation "text" should be ${explanationLength} providing context, significance, and nuance beyond the finding itself
+8. Produce ${totalFindings} findings total, distributed across all sections
+9. Use sequential IDs: f1, f2, f3, ... f${maxFinding}
 
 RULES FOR SECTIONS:
 1. Use these section IDs: investment_thesis, recent_price_action, financial_performance, product_and_technology, competitive_landscape, industry_and_macro, key_risks, analyst_consensus
 2. The "content" array weaves findings into natural prose. Reading all the text values and finding texts in order should produce coherent paragraphs
 3. Connecting text should read like professional equity research — not bullet points
-4. Each section should have 3-5 findings
+4. Each section should have ${findingsPerSection} findings
 5. Include a "title" field for each section (e.g., "Investment Thesis", "Recent Price Action")
 6. Use { "type": "break" } to separate logical paragraph groups within a section. Sections with 4+ findings SHOULD have at least one break. For example: first paragraph covers the headline metrics, break, second paragraph covers details and context. This creates visual breathing room — a wall of text is unprofessional
 
@@ -111,7 +128,7 @@ RULES FOR META:
 1. The rating should reflect the evidence (Overweight if bullish, Underweight if bearish)
 2. Price target should be based on analyst consensus from the evidence
 3. All numbers must come from the evidence — never guess
-4. keyStats should have exactly 6 items in the order shown above
+4. keyStats should have exactly ${keyStatsCount} items in the order shown above
 
 Respond with JSON only. No markdown fences. No commentary.`,
     messages: [

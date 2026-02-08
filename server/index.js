@@ -89,7 +89,7 @@ if (process.env.NODE_ENV === "production") {
 // ── SSE endpoint: generate an explainable report ────────────────────────────
 
 app.post("/api/generate", rateLimit, async (req, res) => {
-  const { query } = req.body;
+  const { query, reasoningLevel } = req.body;
 
   // Input validation
   if (!query || typeof query !== "string" || query.trim().length < 3) {
@@ -132,7 +132,7 @@ app.post("/api/generate", rateLimit, async (req, res) => {
   }, 15_000);
 
   try {
-    await runPipeline(query.trim(), send, () => aborted);
+    await runPipeline(query.trim(), send, () => aborted, reasoningLevel);
     if (!aborted) send("done", { success: true });
   } catch (err) {
     console.error("Pipeline error:", err);

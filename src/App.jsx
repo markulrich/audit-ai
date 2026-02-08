@@ -44,6 +44,7 @@ export default function App() {
   const [report, setReport] = useState(null);
   const [error, setError] = useState(null);
   const [traceData, setTraceData] = useState([]);
+  const [reasoningLevel, setReasoningLevel] = useState("heavy");
   const abortRef = useRef(null);
 
   const handleGenerate = async (query) => {
@@ -66,7 +67,7 @@ export default function App() {
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query }),
+        body: JSON.stringify({ query, reasoningLevel }),
         signal: controller.signal,
       });
 
@@ -231,6 +232,8 @@ export default function App() {
       <QueryInput
         onSubmit={handleGenerate}
         disabled={state === "loading"}
+        reasoningLevel={reasoningLevel}
+        onReasoningLevelChange={setReasoningLevel}
       />
 
       {/* Progress */}

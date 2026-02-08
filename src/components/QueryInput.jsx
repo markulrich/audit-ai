@@ -7,7 +7,14 @@ const EXAMPLES = [
   "Apple financial analysis and outlook",
 ];
 
-export default function QueryInput({ onSubmit, disabled }) {
+const REASONING_LEVELS = [
+  { value: "x-light", label: "X-Light", description: "Fastest — for testing" },
+  { value: "light", label: "Light", description: "Faster — reduced scope" },
+  { value: "heavy", label: "Heavy", description: "Full quality" },
+  { value: "x-heavy", label: "X-Heavy", description: "Maximum depth" },
+];
+
+export default function QueryInput({ onSubmit, disabled, reasoningLevel, onReasoningLevelChange }) {
   const [query, setQuery] = useState("");
 
   const handleSubmit = (e) => {
@@ -67,6 +74,67 @@ export default function QueryInput({ onSubmit, disabled }) {
           </button>
         </div>
       </form>
+
+      {/* Reasoning level selector */}
+      <div
+        style={{
+          display: "flex",
+          gap: 6,
+          marginTop: 12,
+          justifyContent: "center",
+          alignItems: "center",
+        }}
+      >
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 600,
+            color: "#8a8ca5",
+            marginRight: 4,
+            letterSpacing: 0.3,
+            textTransform: "uppercase",
+          }}
+        >
+          Reasoning
+        </span>
+        {REASONING_LEVELS.map((level) => {
+          const isActive = reasoningLevel === level.value;
+          return (
+            <button
+              key={level.value}
+              onClick={() => onReasoningLevelChange(level.value)}
+              disabled={disabled}
+              title={level.description}
+              style={{
+                padding: "4px 12px",
+                fontSize: 11,
+                fontWeight: isActive ? 700 : 500,
+                border: isActive ? "1.5px solid #1a1a2e" : "1px solid #e2e4ea",
+                borderRadius: 4,
+                background: isActive ? "#1a1a2e" : "#fff",
+                color: isActive ? "#fff" : "#555770",
+                cursor: disabled ? "not-allowed" : "pointer",
+                transition: "all 0.15s",
+                opacity: disabled ? 0.5 : 1,
+              }}
+              onMouseEnter={(e) => {
+                if (!isActive && !disabled) {
+                  e.target.style.borderColor = "#1a1a2e";
+                  e.target.style.color = "#1a1a2e";
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!isActive && !disabled) {
+                  e.target.style.borderColor = "#e2e4ea";
+                  e.target.style.color = "#555770";
+                }
+              }}
+            >
+              {level.label}
+            </button>
+          );
+        })}
+      </div>
 
       {/* Example queries */}
       {!disabled && (

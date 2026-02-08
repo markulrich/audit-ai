@@ -37,9 +37,10 @@ const DOMAIN_PROFILES = {
  * Classifies the user query into a domain and returns the appropriate profile.
  * For V1, we only support equity_research but the architecture supports expansion.
  */
-export async function classifyDomain(query, send) {
+export async function classifyDomain(query, send, config = {}) {
   const params = {
-    max_tokens: 512,
+    ...(config.classifierModel && { model: config.classifierModel }),
+    max_tokens: config.classifierMaxTokens || 512,
     system: `You are a query classifier for DoublyAI, an explainable research platform.
 Given a user query, determine which research domain it belongs to.
 
