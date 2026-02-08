@@ -137,18 +137,26 @@ app.post("/api/generate", rateLimit, async (req, res) => {
   } catch (err) {
     console.error("Pipeline error:", err);
     if (!aborted) {
-      // Sanitize error message — never leak internals
+      // Show detailed error info for debugging
+      const detail = {
+        message: err.message || "Unknown error",
+        stage: err.stage || "unknown",
+        status: err.status || null,
+        type: err.constructor?.name || "Error",
+      };
+
       const safeMessage =
         err.keyMissing
           ? "ANTHROPIC_API_KEY is not set. Configure it on the server to enable report generation."
           : err.status === 401 || err.status === 403
-          ? "ANTHROPIC_API_KEY is set but was rejected by the API. Check that it is valid."
+          ? `ANTHROPIC_API_KEY was rejected by the API (HTTP ${err.status}). Check that it is valid.`
           : err.status === 429
           ? "API rate limit hit. Please wait a minute and try again."
           : err.status >= 500
-          ? "Upstream API error. Please try again shortly."
-          : "Report generation failed. Please try a different query.";
-      send("error", { message: safeMessage });
+          ? `Upstream API error (HTTP ${err.status}). Please try again shortly.`
+          : `Pipeline failed: ${err.message || "Unknown error"}`;
+
+      send("error", { message: safeMessage, detail });
     }
   } finally {
     clearInterval(heartbeat);

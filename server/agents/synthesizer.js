@@ -12,6 +12,7 @@ export async function synthesize(query, domainProfile, evidence, send) {
   const { ticker, companyName } = domainProfile;
 
   const params = {
+    model: "claude-sonnet-4-5",
     max_tokens: 16384,
     system: `You are a senior equity research analyst at a top-tier investment bank (Morgan Stanley, JPMorgan, Goldman Sachs caliber).
 
@@ -159,22 +160,139 @@ Respond with JSON only. No markdown fences. No commentary.`,
   } catch (e) {
     console.error("Synthesis agent parse error:", e.message);
     const rawText = response.content?.[0]?.text || "";
-    const match = rawText.match(/\{[\s\S]*\}/);
-    if (match) {
+    const stopReason = response.stop_reason;
+
+    // If the response was truncated (max_tokens), try repair first since
+    // balanced-brace extraction would only find incomplete sub-objects.
+    if (stopReason === "max_tokens" && rawText.length > 0) {
+      console.warn("Synthesis agent response was truncated at max_tokens, attempting repair");
+      const repaired = repairTruncatedJson(rawText.replace(/```json\n?|\n?```/g, "").trim());
+      if (repaired) {
+        try {
+          const result = JSON.parse(repaired);
+          return {
+            result,
+            trace: {
+              ...trace,
+              parsedOutput: { findingsCount: result.findings?.length || 0, sectionsCount: result.sections?.length || 0 },
+              parseWarning: "Repaired truncated JSON (max_tokens)",
+            },
+          };
+        } catch (repairErr) {
+          console.error("Synthesis agent truncation repair failed:", repairErr.message);
+        }
+      }
+    }
+
+    // Try balanced-brace extraction to find a valid JSON object
+    // (for cases where AI wrapped valid JSON in commentary text)
+    const extracted = extractJsonObject(rawText);
+    if (extracted) {
       try {
-        const result = JSON.parse(match[0]);
+        const result = JSON.parse(extracted);
         return {
           result,
           trace: {
             ...trace,
             parsedOutput: { findingsCount: result.findings?.length || 0, sectionsCount: result.sections?.length || 0 },
-            parseWarning: "Extracted via regex fallback",
+            parseWarning: "Extracted via balanced-brace fallback",
           },
         };
       } catch (parseErr) {
-        console.error("Synthesis agent regex fallback parse error:", parseErr.message);
+        console.error("Synthesis agent brace-match fallback parse error:", parseErr.message);
       }
     }
+
     throw new Error("Synthesis agent failed to produce valid report");
   }
+}
+
+/**
+ * Extract a JSON object from text with surrounding commentary by finding
+ * balanced brace pairs. Avoids the greedy regex pitfall.
+ */
+function extractJsonObject(text) {
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== "{") continue;
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+    for (let j = i; j < text.length; j++) {
+      const ch = text[j];
+      if (escape) { escape = false; continue; }
+      if (ch === "\\" && inString) { escape = true; continue; }
+      if (ch === '"') { inString = !inString; continue; }
+      if (inString) continue;
+      if (ch === "{") depth++;
+      if (ch === "}") {
+        depth--;
+        if (depth === 0) {
+          const candidate = text.slice(i, j + 1);
+          try {
+            JSON.parse(candidate);
+            return candidate;
+          } catch {
+            break; // Not valid JSON, try the next '{' in the outer loop
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Attempt to repair truncated JSON by closing all open brackets and braces.
+ * This handles the common case where the model hits max_tokens mid-output.
+ *
+ * Strategy: walk the text tracking open structures, then progressively
+ * trim from the end to find a clean cut point (not inside a string or
+ * key-value pair), and close all remaining open structures.
+ */
+function repairTruncatedJson(text) {
+  // Find a clean cut point by trimming back to the last complete value
+  // Try several strategies, from least to most aggressive:
+  const candidates = [
+    text,
+    // Strip trailing incomplete string (unmatched quote at end)
+    text.replace(/,?\s*"[^"]*$/, ""),
+    // Strip trailing incomplete key-value pair
+    text.replace(/,?\s*"[^"]*"\s*:\s*"?[^"{}[\]]*$/, ""),
+    // Strip back to the last closing brace/bracket
+    text.replace(/[^}\]]*$/, ""),
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate || candidate.length < 2) continue;
+
+    const closers = [];
+    let inString = false;
+    let escape = false;
+    let valid = true;
+
+    for (let i = 0; i < candidate.length; i++) {
+      const ch = candidate[i];
+      if (escape) { escape = false; continue; }
+      if (ch === "\\" && inString) { escape = true; continue; }
+      if (ch === '"') { inString = !inString; continue; }
+      if (inString) continue;
+      if (ch === "{") closers.push("}");
+      else if (ch === "[") closers.push("]");
+      else if (ch === "}" || ch === "]") closers.pop();
+    }
+
+    // If we're stuck inside a string, this cut point isn't clean
+    if (inString) continue;
+    if (closers.length === 0) continue;
+
+    const repaired = candidate + closers.reverse().join("");
+    try {
+      JSON.parse(repaired);
+      return repaired;
+    } catch {
+      // This cut point didn't produce valid JSON, try the next one
+    }
+  }
+
+  return null;
 }

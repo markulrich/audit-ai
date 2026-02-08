@@ -96,7 +96,11 @@ export default function App() {
 
         if (eventType === "error" || (eventType === "message" && typeof payload?.error === "string")) {
           receivedError = true;
-          setError(payload?.message || payload?.error || "Report generation failed.");
+          const errorInfo = {
+            message: payload?.message || payload?.error || "Report generation failed.",
+            detail: payload?.detail || null,
+          };
+          setError(errorInfo);
           setState("error");
           return;
         }
@@ -159,11 +163,11 @@ export default function App() {
       // If stream ended without a report or error event
       if (!receivedReport && !receivedError) {
         setState("error");
-        setError("Pipeline completed without producing a report.");
+        setError({ message: "Pipeline completed without producing a report.", detail: null });
       }
     } catch (err) {
       if (err.name === "AbortError") return; // User cancelled — do nothing
-      setError(err.message);
+      setError({ message: err.message, detail: null });
       setState("error");
     }
   };
@@ -266,14 +270,36 @@ export default function App() {
               background: "#b91c1c0a",
               border: "1px solid #b91c1c30",
               borderRadius: 6,
-              maxWidth: 560,
+              maxWidth: 700,
               width: "100%",
             }}
           >
             <div style={{ fontSize: 13, fontWeight: 600, color: "#b91c1c", marginBottom: 4 }}>
-              Generation Failed
+              Generation Failed{error?.detail?.stage ? ` (stage: ${error.detail.stage})` : ""}
             </div>
-            <div style={{ fontSize: 13, color: "#555770" }}>{error}</div>
+            <div style={{ fontSize: 13, color: "#555770" }}>
+              {typeof error === "string" ? error : error?.message}
+            </div>
+            {error?.detail && (
+              <pre
+                style={{
+                  marginTop: 8,
+                  padding: "10px 12px",
+                  background: "#f8f8fa",
+                  border: "1px solid #e2e4ea",
+                  borderRadius: 4,
+                  fontSize: 11,
+                  color: "#333",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                  maxHeight: 200,
+                  overflow: "auto",
+                  fontFamily: "monospace",
+                }}
+              >
+                {JSON.stringify(error.detail, null, 2)}
+              </pre>
+            )}
             <button
               onClick={handleReset}
               style={{

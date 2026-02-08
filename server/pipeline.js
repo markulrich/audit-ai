@@ -20,6 +20,12 @@ import { ANTHROPIC_MODEL } from "./anthropic-client.js";
 export async function runPipeline(query, send, isAborted = () => false) {
   const pipelineStartTime = Date.now();
 
+  /** Tag an error with the pipeline stage it came from. */
+  function tagError(err, stage) {
+    err.stage = stage;
+    return err;
+  }
+
   // ── Stage 1: Classify ───────────────────────────────────────────────────────
   send("progress", {
     stage: "classifying",
@@ -33,8 +39,14 @@ export async function runPipeline(query, send, isAborted = () => false) {
     ],
   });
 
-  const { result: domainProfile, trace: classifierTrace } =
-    await classifyDomain(query, send);
+  let domainProfile, classifierTrace;
+  try {
+    const classifierResult = await classifyDomain(query, send);
+    domainProfile = classifierResult.result;
+    classifierTrace = classifierResult.trace;
+  } catch (err) {
+    throw tagError(err, "classifier");
+  }
   if (isAborted()) return;
 
   send("progress", {
@@ -74,11 +86,14 @@ export async function runPipeline(query, send, isAborted = () => false) {
     ],
   });
 
-  const { result: evidence, trace: researcherTrace } = await research(
-    query,
-    domainProfile,
-    send
-  );
+  let evidence, researcherTrace;
+  try {
+    const researcherResult = await research(query, domainProfile, send);
+    evidence = researcherResult.result;
+    researcherTrace = researcherResult.trace;
+  } catch (err) {
+    throw tagError(err, "researcher");
+  }
   if (isAborted()) return;
 
   // Compute evidence category breakdown
@@ -135,12 +150,14 @@ export async function runPipeline(query, send, isAborted = () => false) {
     ],
   });
 
-  const { result: draft, trace: synthesizerTrace } = await synthesize(
-    query,
-    domainProfile,
-    evidence,
-    send
-  );
+  let draft, synthesizerTrace;
+  try {
+    const synthesizerResult = await synthesize(query, domainProfile, evidence, send);
+    draft = synthesizerResult.result;
+    synthesizerTrace = synthesizerResult.trace;
+  } catch (err) {
+    throw tagError(err, "synthesizer");
+  }
   if (isAborted()) return;
 
   // Compute section breakdown
@@ -189,12 +206,14 @@ export async function runPipeline(query, send, isAborted = () => false) {
     ],
   });
 
-  const { result: report, trace: verifierTrace } = await verify(
-    query,
-    domainProfile,
-    draft,
-    send
-  );
+  let report, verifierTrace;
+  try {
+    const verifierResult = await verify(query, domainProfile, draft, send);
+    report = verifierResult.result;
+    verifierTrace = verifierResult.trace;
+  } catch (err) {
+    throw tagError(err, "verifier");
+  }
   if (isAborted()) return;
 
   const findingsCount = report.findings?.length || 0;
