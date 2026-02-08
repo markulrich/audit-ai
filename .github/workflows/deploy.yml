@@ -53,5 +53,10 @@ jobs:
       - name: Setup flyctl
         uses: superfly/flyctl-actions/setup-flyctl@fc53c09e1bc3be6f54706524e3b82c4f462f77be # v1.5
 
+      - name: Create app (if needed)
+        run: |
+          flyctl apps list | grep -q "^doublyai " || \
+            flyctl apps create doublyai --org personal
+
       - name: Deploy to production
-        run: flyctl deploy --app doublyai
+        run: flyctl deploy
