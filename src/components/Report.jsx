@@ -427,12 +427,37 @@ function useIsMobile() {
 
 // ─── Main Report Component ─────────────────────────────────────────────────────
 
-export default function Report({ data, traceData, onBack }) {
+export default function Report({ data, traceData, onBack, publishedSlug }) {
   const [activeId, setActiveId] = useState("overview");
   const [showPanel, setShowPanel] = useState(false); // for mobile panel toggle
   const [showDetails, setShowDetails] = useState(false);
+  const [publishState, setPublishState] = useState(publishedSlug ? "done" : "idle"); // idle | publishing | done | error
+  const [publishedUrl, setPublishedUrl] = useState(publishedSlug ? `/reports/${publishedSlug}` : null);
+  const [publishError, setPublishError] = useState(null);
   const panelRef = useRef(null);
   const isMobile = useIsMobile();
+
+  const handlePublish = async () => {
+    setPublishState("publishing");
+    setPublishError(null);
+    try {
+      const res = await fetch("/api/reports/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ report: data, slug: publishedSlug || undefined }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `Server error: ${res.status}`);
+      }
+      const result = await res.json();
+      setPublishedUrl(result.url);
+      setPublishState("done");
+    } catch (err) {
+      setPublishError(err.message);
+      setPublishState("error");
+    }
+  };
 
   const { meta, sections, findings } = data;
 
@@ -568,7 +593,7 @@ export default function Report({ data, traceData, onBack }) {
       <div style={{ flex: 1, overflow: "auto" }}>
         <div style={{ maxWidth: 780, margin: "0 auto", padding: isMobile ? "20px 16px 60px" : "32px 40px 60px" }}>
           {/* Top buttons */}
-          <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
             <button
               onClick={onBack}
               aria-label="Start new report"
@@ -602,6 +627,105 @@ export default function Report({ data, traceData, onBack }) {
               >
                 Report Details
               </button>
+            )}
+            {publishState === "idle" && (
+              <button
+                onClick={handlePublish}
+                aria-label="Publish report"
+                style={{
+                  padding: "4px 12px",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  border: `1px solid ${COLORS.green}40`,
+                  borderRadius: 4,
+                  background: COLORS.green + "0d",
+                  color: COLORS.green,
+                  cursor: "pointer",
+                  marginLeft: "auto",
+                }}
+              >
+                Publish
+              </button>
+            )}
+            {publishState === "publishing" && (
+              <span
+                style={{
+                  padding: "4px 12px",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  color: COLORS.textMuted,
+                  marginLeft: "auto",
+                }}
+              >
+                Publishing...
+              </span>
+            )}
+            {publishState === "done" && publishedUrl && (
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "4px 12px",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  color: COLORS.green,
+                  background: COLORS.green + "0d",
+                  border: `1px solid ${COLORS.green}30`,
+                  borderRadius: 4,
+                  marginLeft: "auto",
+                }}
+              >
+                Published
+                <button
+                  onClick={() => {
+                    const fullUrl = window.location.origin + publishedUrl;
+                    navigator.clipboard.writeText(fullUrl).catch(() => {});
+                  }}
+                  aria-label="Copy published report link"
+                  style={{
+                    border: `1px solid ${COLORS.green}40`,
+                    background: "#fff",
+                    borderRadius: 3,
+                    padding: "1px 8px",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: COLORS.green,
+                    cursor: "pointer",
+                  }}
+                >
+                  Copy Link
+                </button>
+              </span>
+            )}
+            {publishState === "error" && (
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontSize: 12,
+                  color: COLORS.red,
+                  marginLeft: "auto",
+                }}
+              >
+                {publishError || "Publish failed"}
+                <button
+                  onClick={handlePublish}
+                  style={{
+                    border: `1px solid ${COLORS.red}40`,
+                    background: "#fff",
+                    borderRadius: 3,
+                    padding: "1px 8px",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: COLORS.red,
+                    cursor: "pointer",
+                  }}
+                >
+                  Retry
+                </button>
+              </span>
             )}
           </div>
 

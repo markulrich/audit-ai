@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import QueryInput from "./components/QueryInput.jsx";
 import ProgressStream from "./components/ProgressStream.jsx";
 import Report from "./components/Report.jsx";
@@ -38,14 +38,46 @@ function parseSseBlock(block) {
   return { eventType, data: dataLines.join("\n") };
 }
 
+// Check if we're on a /reports/:slug route
+function getPublishedSlug() {
+  const match = window.location.pathname.match(/^\/reports\/([a-z0-9-]+)$/);
+  return match ? match[1] : null;
+}
+
 export default function App() {
-  const [state, setState] = useState("idle"); // idle | loading | done | error
+  const [state, setState] = useState(() => getPublishedSlug() ? "loading-published" : "idle"); // idle | loading | loading-published | done | error
   const [progress, setProgress] = useState([]);
   const [report, setReport] = useState(null);
   const [error, setError] = useState(null);
   const [traceData, setTraceData] = useState([]);
   const [reasoningLevel, setReasoningLevel] = useState("heavy");
+  const [publishedSlug, setPublishedSlug] = useState(getPublishedSlug);
   const abortRef = useRef(null);
+
+  // Load published report on mount if URL matches /reports/:slug
+  useEffect(() => {
+    const slug = getPublishedSlug();
+    if (!slug) return;
+
+    const params = new URLSearchParams(window.location.search);
+    const version = params.get("v");
+    const url = `/api/reports/${slug}${version ? `?v=${version}` : ""}`;
+
+    fetch(url)
+      .then((res) => {
+        if (!res.ok) throw new Error(res.status === 404 ? "Report not found" : `Error ${res.status}`);
+        return res.json();
+      })
+      .then((data) => {
+        setReport(data.report);
+        setPublishedSlug(slug);
+        setState("done");
+      })
+      .catch((err) => {
+        setError({ message: err.message || "Failed to load report", detail: null });
+        setState("error");
+      });
+  }, []);
 
   const handleGenerate = async (query) => {
     // Abort any in-flight request
@@ -58,6 +90,7 @@ export default function App() {
     setReport(null);
     setError(null);
     setTraceData([]);
+    setPublishedSlug(null);
 
     // Local flags to avoid stale closure over React state
     let receivedReport = false;
@@ -204,10 +237,32 @@ export default function App() {
     setReport(null);
     setError(null);
     setTraceData([]);
+    setPublishedSlug(null);
+    // Clear /reports/:slug from URL if present
+    if (window.location.pathname.startsWith("/reports/")) {
+      window.history.pushState(null, "", "/");
+    }
   };
 
   if (state === "done" && report) {
-    return <Report data={report} traceData={traceData} onBack={handleReset} />;
+    return <Report data={report} traceData={traceData} onBack={handleReset} publishedSlug={publishedSlug} />;
+  }
+
+  if (state === "loading-published") {
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "60px 24px",
+        }}
+      >
+        <div style={{ fontSize: 14, color: "#8a8ca5", fontWeight: 500 }}>Loading report...</div>
+      </div>
+    );
   }
 
   return (

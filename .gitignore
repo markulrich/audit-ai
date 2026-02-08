@@ -26,6 +26,9 @@ secrets/
 .secrets/
 *.local
 
+# Local data (report storage fallback)
+.data/
+
 # Logs and runtime files
 *.log
 logs/
