@@ -96,6 +96,31 @@ Respond with a JSON array of evidence items. JSON only, no markdown.`,
   } catch (e) {
     console.error("Research agent parse error:", e.message);
     const rawText = response.content?.[0]?.text || "";
+    const stopReason = response.stop_reason;
+
+    // If the response was truncated (max_tokens), try repair first since
+    // regex extraction would only find incomplete sub-arrays.
+    if (stopReason === "max_tokens" && rawText.length > 0) {
+      console.warn("Research agent response was truncated at max_tokens, attempting repair");
+      const repaired = repairTruncatedJson(rawText.replace(/```json\n?|\n?```/g, "").trim());
+      if (repaired) {
+        try {
+          const result = JSON.parse(repaired);
+          if (Array.isArray(result)) {
+            return {
+              result,
+              trace: {
+                ...trace,
+                parsedOutput: { evidenceCount: result.length },
+                parseWarning: "Repaired truncated JSON (max_tokens)",
+              },
+            };
+          }
+        } catch (repairErr) {
+          console.error("Research agent truncation repair failed:", repairErr.message);
+        }
+      }
+    }
 
     // Try to extract a JSON array from surrounding commentary
     const match = rawText.match(/\[[\s\S]*\]/);
@@ -110,12 +135,62 @@ Respond with a JSON array of evidence items. JSON only, no markdown.`,
 
     // Include the raw response snippet in the error for debugging
     const preview = rawText.slice(0, 300);
-    const stopReason = response.stop_reason;
-    throw new Error(
+    const error = new Error(
       `Research agent failed to produce valid JSON array. ` +
       `Parse error: ${e.message}. ` +
       `Stop reason: ${stopReason || "unknown"}. ` +
       `Response preview: ${preview}${rawText.length > 300 ? "..." : ""}`
     );
+    error.agentTrace = trace;
+    error.rawOutput = rawText;
+    throw error;
   }
+}
+
+/**
+ * Attempt to repair truncated JSON by closing all open brackets and braces.
+ * This handles the common case where the model hits max_tokens mid-output.
+ */
+function repairTruncatedJson(text) {
+  const candidates = [
+    text,
+    // Strip trailing incomplete string (unmatched quote at end)
+    text.replace(/,?\s*"[^"]*$/, ""),
+    // Strip trailing incomplete key-value pair
+    text.replace(/,?\s*"[^"]*"\s*:\s*"?[^"{}[\]]*$/, ""),
+    // Strip back to the last closing brace/bracket
+    text.replace(/[^}\]]*$/, ""),
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate || candidate.length < 2) continue;
+
+    const closers = [];
+    let inString = false;
+    let escape = false;
+
+    for (let i = 0; i < candidate.length; i++) {
+      const ch = candidate[i];
+      if (escape) { escape = false; continue; }
+      if (ch === "\\" && inString) { escape = true; continue; }
+      if (ch === '"') { inString = !inString; continue; }
+      if (inString) continue;
+      if (ch === "{") closers.push("}");
+      else if (ch === "[") closers.push("]");
+      else if (ch === "}" || ch === "]") closers.pop();
+    }
+
+    if (inString) continue;
+    if (closers.length === 0) continue;
+
+    const repaired = candidate + closers.reverse().join("");
+    try {
+      JSON.parse(repaired);
+      return repaired;
+    } catch {
+      // This cut point didn't produce valid JSON, try the next one
+    }
+  }
+
+  return null;
 }

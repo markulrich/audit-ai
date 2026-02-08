@@ -143,6 +143,10 @@ app.post("/api/generate", rateLimit, async (req, res) => {
         stage: err.stage || "unknown",
         status: err.status || null,
         type: err.constructor?.name || "Error",
+        rawOutputPreview: err.rawOutput ? err.rawOutput.slice(0, 500) + (err.rawOutput.length > 500 ? "..." : "") : null,
+        stopReason: err.agentTrace?.response?.stop_reason || null,
+        tokenUsage: err.agentTrace?.response?.usage || null,
+        durationMs: err.agentTrace?.timing?.durationMs || null,
       };
 
       const safeMessage =

@@ -20,7 +20,7 @@ export const REASONING_LEVELS = {
 
     // Max tokens
     classifierMaxTokens: 256,
-    researcherMaxTokens: 2048,
+    researcherMaxTokens: 4096,
     synthesizerMaxTokens: 3000,
     verifierMaxTokens: 3000,
 

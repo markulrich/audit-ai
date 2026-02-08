@@ -29,9 +29,19 @@ export async function runPipeline(query, send, isAborted = () => false, reasonin
     detail: `${config.description} | Evidence: ${config.evidenceMinItems}+ items | Findings: ${config.totalFindings} | Model: ${config.synthesizerModel || "default"}`,
   });
 
-  /** Tag an error with the pipeline stage it came from. */
+  /** Tag an error with the pipeline stage it came from and emit error trace. */
   function tagError(err, stage) {
     err.stage = stage;
+    // Emit error trace so frontend can show raw LLM output for failed stages
+    if (err.agentTrace || err.rawOutput) {
+      send("trace", {
+        stage,
+        agent: stage.charAt(0).toUpperCase() + stage.slice(1),
+        status: "error",
+        trace: err.agentTrace || {},
+        rawOutput: err.rawOutput || "",
+      });
+    }
     return err;
   }
 

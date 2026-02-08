@@ -143,13 +143,14 @@ function MiniCodeBlock({ content, maxHeight }) {
 
 // ─── Single stage card ──────────────────────────────────────────────────────
 
-function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent, isActive, isDone, isPending, isFailed, errorMessage }) {
+function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent, isActive, isDone, isPending, isFailed, errorMessage, errorDetail }) {
   const [expanded, setExpanded] = useState(false);
   const [drillTab, setDrillTab] = useState("overview");
   const elapsedSec = useElapsed(isActive || isFailed, isFailed);
   const data = doneData || activeData;
   const stats = data?.stats;
   const prevPendingRef = useRef(null);
+  const prevFailedRef = useRef(false);
 
   // Use completed trace if available, otherwise use pending (pre-call) trace
   const activeTrace = traceEvent || pendingTraceEvent;
@@ -162,6 +163,16 @@ function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent
     }
     prevPendingRef.current = pendingTraceEvent;
   }, [pendingTraceEvent, isActive]);
+
+  // Auto-expand and show raw output when stage fails
+  useEffect(() => {
+    if (isFailed && !prevFailedRef.current) {
+      setExpanded(true);
+      // Show raw output tab if trace data is available, otherwise show overview
+      setDrillTab(activeTrace ? "raw" : "overview");
+    }
+    prevFailedRef.current = isFailed;
+  }, [isFailed, activeTrace]);
 
   return (
     <div
@@ -600,7 +611,8 @@ function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent
                   { id: "overview", label: "Overview" },
                   { id: "system", label: "System Prompt" },
                   { id: "user", label: "User Msg" },
-                  { id: "raw", label: "Raw Output", disabled: !traceEvent },
+                  { id: "raw", label: "Raw Output", disabled: !traceEvent && !isFailed },
+                  ...(isFailed && errorDetail ? [{ id: "error", label: "Error Detail" }] : []),
                 ].map((tab) => (
                   <button
                     key={tab.id}
@@ -629,18 +641,34 @@ function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent
                 <div style={{ fontSize: 10, color: COLORS.textSecondary }}>
                   <div>Model: <b>{activeTrace.trace?.request?.model || "default"}</b></div>
                   <div>Max tokens: <b>{activeTrace.trace?.request?.max_tokens?.toLocaleString()}</b></div>
-                  {traceEvent ? (
+                  {(traceEvent || (isFailed && activeTrace.trace?.response)) ? (
                     <>
-                      <div>Stop reason: <b>{traceEvent.trace?.response?.stop_reason || "?"}</b></div>
+                      <div>Stop reason: <b style={{ color: (traceEvent || activeTrace).trace?.response?.stop_reason === "max_tokens" ? COLORS.red : "inherit" }}>
+                        {(traceEvent || activeTrace).trace?.response?.stop_reason || "?"}
+                      </b></div>
                       <div>
-                        Tokens: <b>{traceEvent.trace?.response?.usage?.input_tokens?.toLocaleString()}</b> in
-                        / <b>{traceEvent.trace?.response?.usage?.output_tokens?.toLocaleString()}</b> out
+                        Tokens: <b>{(traceEvent || activeTrace).trace?.response?.usage?.input_tokens?.toLocaleString()}</b> in
+                        / <b>{(traceEvent || activeTrace).trace?.response?.usage?.output_tokens?.toLocaleString()}</b> out
                       </div>
-                      <div>Duration: <b>{((traceEvent.trace?.timing?.durationMs || 0) / 1000).toFixed(1)}s</b></div>
+                      <div>Duration: <b>{(((traceEvent || activeTrace).trace?.timing?.durationMs || 0) / 1000).toFixed(1)}s</b></div>
+                      {(traceEvent || activeTrace).trace?.parseWarning && (
+                        <div style={{ color: COLORS.orange, marginTop: 4 }}>
+                          Parse warning: {(traceEvent || activeTrace).trace.parseWarning}
+                        </div>
+                      )}
                     </>
+                  ) : isFailed ? (
+                    <div style={{ color: COLORS.red, fontStyle: "italic", marginTop: 4 }}>
+                      LLM call failed before response was received
+                    </div>
                   ) : (
                     <div style={{ color: config.color, fontStyle: "italic", marginTop: 4 }}>
                       Waiting for LLM response...
+                    </div>
+                  )}
+                  {isFailed && errorMessage && (
+                    <div style={{ color: COLORS.red, marginTop: 8, padding: "6px 8px", background: COLORS.red + "08", borderRadius: 3, fontSize: 10, lineHeight: 1.5 }}>
+                      <b>Error:</b> {errorMessage}
                     </div>
                   )}
                 </div>
@@ -656,10 +684,15 @@ function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent
               )}
               {drillTab === "raw" && (
                 traceEvent
-                  ? <MiniCodeBlock content={traceEvent.trace?.response?.raw || "N/A"} maxHeight={250} />
+                  ? <MiniCodeBlock content={traceEvent.trace?.response?.raw || traceEvent.rawOutput || "N/A"} maxHeight={400} />
+                  : isFailed && activeTrace?.rawOutput
+                  ? <MiniCodeBlock content={activeTrace.rawOutput} maxHeight={400} />
                   : <div style={{ fontSize: 10, color: config.color, fontStyle: "italic", padding: "10px 0" }}>
                       Response not yet available — LLM call in progress...
                     </div>
+              )}
+              {drillTab === "error" && errorDetail && (
+                <MiniCodeBlock content={errorDetail} maxHeight={400} />
               )}
             </div>
           )}
@@ -679,7 +712,7 @@ export default function ProgressStream({ steps, traceData, error }) {
   const stageMap = {};
   steps.forEach((s) => { stageMap[s.stage] = s; });
 
-  // Separate completed traces from pending (pre-call) traces
+  // Separate completed/error traces from pending (pre-call) traces
   const traceMap = {};
   const pendingTraceMap = {};
   (traceData || []).forEach((t) => {
@@ -759,6 +792,7 @@ export default function ProgressStream({ steps, traceData, error }) {
               isPending={isPending}
               isFailed={isFailed}
               errorMessage={isFailed ? (error?.message || error?.detail?.message || "Unknown error") : null}
+              errorDetail={isFailed ? error?.detail : null}
             />
           );
         })}

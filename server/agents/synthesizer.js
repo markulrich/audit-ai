@@ -220,7 +220,10 @@ Respond with JSON only. No markdown fences. No commentary.`,
       }
     }
 
-    throw new Error("Synthesis agent failed to produce valid report");
+    const error = new Error("Synthesis agent failed to produce valid report");
+    error.agentTrace = trace;
+    error.rawOutput = rawText;
+    throw error;
   }
 }
 
