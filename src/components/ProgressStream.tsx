@@ -1,4 +1,59 @@
 import { useState, useEffect, useRef } from "react";
+import type {
+  ProgressEvent,
+  TraceEvent,
+  ErrorInfo,
+  ProgressStats,
+  CertaintyBuckets,
+  EvidencePreviewItem,
+  ErrorDetail,
+} from "../../shared/types";
+
+// ─── Interfaces ──────────────────────────────────────────────────────────────
+
+interface StageConfig {
+  key: string;
+  doneKey: string;
+  label: string;
+  doneLabel: string;
+  icon: string;
+  color: string;
+}
+
+interface PulsingDotProps {
+  color: string;
+}
+
+interface MiniCodeBlockProps {
+  content: string | object;
+  maxHeight?: number;
+}
+
+interface StageCardProps {
+  config: StageConfig;
+  activeData: ProgressEvent | undefined;
+  doneData: ProgressEvent | undefined;
+  traceEvent: TraceEvent | undefined;
+  pendingTraceEvent: TraceEvent | undefined;
+  isActive: boolean;
+  isDone: boolean;
+  isPending: boolean;
+  isFailed: boolean;
+  errorMessage: string | null;
+  errorDetail: ErrorDetail | null | undefined;
+}
+
+interface ProgressStreamProps {
+  steps: ProgressEvent[];
+  traceData: TraceEvent[];
+  error: ErrorInfo | null;
+}
+
+interface DrillTab {
+  id: string;
+  label: string;
+  disabled?: boolean;
+}
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -16,7 +71,7 @@ const COLORS = {
   codeText: "#cdd6f4",
 };
 
-const STAGE_CONFIG = [
+const STAGE_CONFIG: StageConfig[] = [
   {
     key: "classifying",
     doneKey: "classified",
@@ -53,16 +108,16 @@ const STAGE_CONFIG = [
 
 // ─── Elapsed timer hook ─────────────────────────────────────────────────────
 
-function useElapsed(active, frozen) {
-  const [elapsed, setElapsed] = useState(0);
-  const startRef = useRef(null);
+function useElapsed(active: boolean, frozen: boolean): string {
+  const [elapsed, setElapsed] = useState<number>(0);
+  const startRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (active && !frozen) {
       startRef.current = Date.now();
       setElapsed(0);
       const interval = setInterval(() => {
-        setElapsed(Date.now() - startRef.current);
+        setElapsed(Date.now() - (startRef.current as number));
       }, 100);
       return () => clearInterval(interval);
     }
@@ -73,7 +128,7 @@ function useElapsed(active, frozen) {
 
 // ─── Animated dots ──────────────────────────────────────────────────────────
 
-function PulsingDot({ color }) {
+function PulsingDot({ color }: PulsingDotProps) {
   return (
     <span
       style={{
@@ -91,8 +146,8 @@ function PulsingDot({ color }) {
 
 // ─── Code Block (for raw output drill-down) ─────────────────────────────────
 
-function MiniCodeBlock({ content, maxHeight }) {
-  const [copied, setCopied] = useState(false);
+function MiniCodeBlock({ content, maxHeight }: MiniCodeBlockProps) {
+  const [copied, setCopied] = useState<boolean>(false);
   const text = typeof content === "string" ? content : JSON.stringify(content, null, 2);
 
   return (
@@ -143,17 +198,17 @@ function MiniCodeBlock({ content, maxHeight }) {
 
 // ─── Single stage card ──────────────────────────────────────────────────────
 
-function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent, isActive, isDone, isPending, isFailed, errorMessage, errorDetail }) {
-  const [expanded, setExpanded] = useState(false);
-  const [drillTab, setDrillTab] = useState("overview");
+function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent, isActive, isDone, isPending, isFailed, errorMessage, errorDetail }: StageCardProps) {
+  const [expanded, setExpanded] = useState<boolean>(false);
+  const [drillTab, setDrillTab] = useState<string>("overview");
   const elapsedSec = useElapsed(isActive || isFailed, isFailed);
-  const data = doneData || activeData;
-  const stats = data?.stats;
-  const prevPendingRef = useRef(null);
-  const prevFailedRef = useRef(false);
+  const data: ProgressEvent | undefined = doneData || activeData;
+  const stats: ProgressStats | undefined = data?.stats;
+  const prevPendingRef = useRef<TraceEvent | null | undefined>(null);
+  const prevFailedRef = useRef<boolean>(false);
 
   // Use completed trace if available, otherwise use pending (pre-call) trace
-  const activeTrace = traceEvent || pendingTraceEvent;
+  const activeTrace: TraceEvent | undefined = traceEvent || pendingTraceEvent;
 
   // Auto-expand when pre-call trace arrives (LLM call starts)
   useEffect(() => {
@@ -226,7 +281,7 @@ function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent
             border: isActive && !isFailed ? `2px solid ${config.color}` : "none",
           }}
         >
-          {isFailed ? "✗" : isDone ? "✓" : config.icon}
+          {isFailed ? "\u2717" : isDone ? "\u2713" : config.icon}
         </div>
 
         {/* Title + message */}
@@ -254,7 +309,7 @@ function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent
                 textOverflow: isFailed ? "unset" : "ellipsis",
               }}
             >
-              {isFailed ? errorMessage : data.message}
+              {isFailed ? errorMessage : data!.message}
             </div>
           )}
         </div>
@@ -315,7 +370,7 @@ function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent
                 transition: "transform 0.15s",
               }}
             >
-              ▶
+              &#9654;
             </span>
           )}
         </div>
@@ -408,7 +463,7 @@ function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent
               >
                 Sample Evidence
               </div>
-              {data.evidencePreview.map((ev, i) => (
+              {data.evidencePreview.map((ev: EvidencePreviewItem, i: number) => (
                 <div
                   key={i}
                   style={{
@@ -511,7 +566,7 @@ function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent
                     <span style={{ fontWeight: 600 }}>{stats.rating}</span>
                   </div>
                 )}
-                {stats.removedCount > 0 && (
+                {(stats.removedCount ?? 0) > 0 && (
                   <div style={{ padding: "3px 6px", background: COLORS.red + "10", borderRadius: 3 }}>
                     <span style={{ color: COLORS.red, fontWeight: 600 }}>
                       {stats.removedCount} finding(s) removed
@@ -607,16 +662,16 @@ function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent
                 )}
               </div>
               <div style={{ display: "flex", gap: 0, borderBottom: `1px solid ${COLORS.border}`, marginBottom: 6 }}>
-                {[
+                {([
                   { id: "overview", label: "Overview" },
                   { id: "system", label: "System Prompt" },
                   { id: "user", label: "User Msg" },
                   { id: "raw", label: "Raw Output", disabled: !traceEvent && !isFailed },
                   ...(isFailed && errorDetail ? [{ id: "error", label: "Error Detail" }] : []),
-                ].map((tab) => (
+                ] as DrillTab[]).map((tab) => (
                   <button
                     key={tab.id}
-                    onClick={(e) => { e.stopPropagation(); if (!tab.disabled) setDrillTab(tab.id); }}
+                    onClick={(e: React.MouseEvent<HTMLButtonElement>) => { e.stopPropagation(); if (!tab.disabled) setDrillTab(tab.id); }}
                     style={{
                       padding: "4px 8px",
                       fontSize: 9,
@@ -653,7 +708,7 @@ function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent
                       <div>Duration: <b>{(((traceEvent || activeTrace).trace?.timing?.durationMs || 0) / 1000).toFixed(1)}s</b></div>
                       {(traceEvent || activeTrace).trace?.parseWarning && (
                         <div style={{ color: COLORS.orange, marginTop: 4 }}>
-                          Parse warning: {(traceEvent || activeTrace).trace.parseWarning}
+                          Parse warning: {(traceEvent || activeTrace).trace!.parseWarning}
                         </div>
                       )}
                     </>
@@ -704,17 +759,17 @@ function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent
 
 // ─── Main Component ─────────────────────────────────────────────────────────
 
-export default function ProgressStream({ steps, traceData, error }) {
-  const latest = steps[steps.length - 1];
-  const percent = latest?.percent || 0;
+export default function ProgressStream({ steps, traceData, error }: ProgressStreamProps) {
+  const latest: ProgressEvent | undefined = steps[steps.length - 1];
+  const percent: number = latest?.percent || 0;
 
   // Build lookup maps
-  const stageMap = {};
+  const stageMap: Record<string, ProgressEvent> = {};
   steps.forEach((s) => { stageMap[s.stage] = s; });
 
   // Separate completed/error traces from pending (pre-call) traces
-  const traceMap = {};
-  const pendingTraceMap = {};
+  const traceMap: Record<string, TraceEvent> = {};
+  const pendingTraceMap: Record<string, TraceEvent> = {};
   (traceData || []).forEach((t) => {
     if (t.status === "pending") {
       pendingTraceMap[t.stage] = t;
@@ -724,7 +779,7 @@ export default function ProgressStream({ steps, traceData, error }) {
   });
 
   // Map STAGE_CONFIG keys to trace stage names
-  const traceKeyMap = {
+  const traceKeyMap: Record<string, string> = {
     classifying: "classifier",
     researching: "researcher",
     synthesizing: "synthesizer",
@@ -732,8 +787,8 @@ export default function ProgressStream({ steps, traceData, error }) {
   };
 
   // Map error stage back to STAGE_CONFIG key
-  const failedStageKey = error?.detail?.stage
-    ? Object.entries(traceKeyMap).find(([, v]) => v === error.detail.stage)?.[0]
+  const failedStageKey: string | null = error?.detail?.stage
+    ? Object.entries(traceKeyMap).find(([, v]) => v === error.detail!.stage)?.[0] ?? null
     : null;
 
   return (
@@ -771,13 +826,13 @@ export default function ProgressStream({ steps, traceData, error }) {
       {/* Stage cards */}
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {STAGE_CONFIG.map((config) => {
-          const isDone = !!stageMap[config.doneKey];
-          const isFailed = config.key === failedStageKey;
-          const isActive = !!stageMap[config.key] && !isDone && !isFailed;
-          const isPending = !stageMap[config.key] && !isFailed;
-          const traceStage = traceKeyMap[config.key];
-          const traceEvent = traceMap[traceStage];
-          const pendingTraceEvent = pendingTraceMap[traceStage];
+          const isDone: boolean = !!stageMap[config.doneKey];
+          const isFailed: boolean = config.key === failedStageKey;
+          const isActive: boolean = !!stageMap[config.key] && !isDone && !isFailed;
+          const isPending: boolean = !stageMap[config.key] && !isFailed;
+          const traceStage: string = traceKeyMap[config.key];
+          const traceEvent: TraceEvent | undefined = traceMap[traceStage];
+          const pendingTraceEvent: TraceEvent | undefined = pendingTraceMap[traceStage];
 
           return (
             <StageCard

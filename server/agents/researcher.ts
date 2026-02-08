@@ -1,4 +1,13 @@
-import { tracedCreate } from "../anthropic-client.js";
+import { tracedCreate } from "../anthropic-client";
+import type {
+  DomainProfile,
+  EvidenceItem,
+  ReasoningConfig,
+  SendFn,
+  AgentResult,
+  TraceData,
+  PipelineError,
+} from "../../shared/types";
 
 /**
  * Research Agent — gathers structured evidence about a topic.
@@ -8,7 +17,12 @@ import { tracedCreate } from "../anthropic-client.js";
  *
  * V1: Uses Claude's training knowledge. Future: add Brave/SerpAPI for live search.
  */
-export async function research(query, domainProfile, send, config = {}) {
+export async function research(
+  query: string,
+  domainProfile: DomainProfile,
+  send: SendFn | undefined,
+  config: Partial<ReasoningConfig> = {}
+): Promise<AgentResult<EvidenceItem[]>> {
   const { ticker, companyName, focusAreas } = domainProfile;
   const evidenceMin = config.evidenceMinItems || 40;
 
@@ -61,7 +75,7 @@ Use the most recent data available to you.
 Respond with a JSON array of evidence items. JSON only, no markdown.`,
     messages: [
       {
-        role: "user",
+        role: "user" as const,
         content: `<user_query>\nGather comprehensive evidence for an equity research report on ${companyName} (${ticker}). Be thorough — I need at least ${evidenceMin} data points covering financials, products, competition, risks, and analyst sentiment.\n</user_query>`,
       },
     ],
@@ -84,18 +98,24 @@ Respond with a JSON array of evidence items. JSON only, no markdown.`,
     });
   }
 
-  const { response, trace } = await tracedCreate(params);
+  // tracedCreate/createMessage fills in model and max_tokens, so params
+  // doesn't need to fully satisfy the Anthropic SDK's CreateMessageParams.
+  const { response, trace } = await tracedCreate(params as Parameters<typeof tracedCreate>[0]);
+
+  // Extract text from the first content block (may be TextBlock or ToolUseBlock)
+  const firstBlock = response.content?.[0] as { text?: string } | undefined;
+  const responseText: string = firstBlock?.text || "";
 
   try {
-    const text = response.content?.[0]?.text;
-    if (!text) throw new Error("Empty researcher response");
-    const cleaned = text.replace(/```json\n?|\n?```/g, "").trim();
-    const result = JSON.parse(cleaned);
-    return { result, trace: { ...trace, parsedOutput: { evidenceCount: result.length } } };
-  } catch (e) {
-    console.error("Research agent parse error:", e.message);
-    const rawText = response.content?.[0]?.text || "";
-    const stopReason = response.stop_reason;
+    if (!responseText) throw new Error("Empty researcher response");
+    const cleaned = responseText.replace(/```json\n?|\n?```/g, "").trim();
+    const result: EvidenceItem[] = JSON.parse(cleaned);
+    return { result, trace: { ...trace, parsedOutput: { evidenceCount: result.length } } as TraceData };
+  } catch (e: unknown) {
+    const parseError = e as Error;
+    console.error("Research agent parse error:", parseError.message);
+    const rawText: string = responseText;
+    const stopReason: string | undefined = response.stop_reason ?? undefined;
 
     // If the response was truncated (max_tokens), try repair first since
     // regex extraction would only find incomplete sub-arrays.
@@ -104,19 +124,19 @@ Respond with a JSON array of evidence items. JSON only, no markdown.`,
       const repaired = repairTruncatedJson(rawText.replace(/```json\n?|\n?```/g, "").trim());
       if (repaired) {
         try {
-          const result = JSON.parse(repaired);
+          const result: unknown = JSON.parse(repaired);
           if (Array.isArray(result)) {
             return {
-              result,
+              result: result as EvidenceItem[],
               trace: {
                 ...trace,
                 parsedOutput: { evidenceCount: result.length },
                 parseWarning: "Repaired truncated JSON (max_tokens)",
-              },
+              } as TraceData,
             };
           }
-        } catch (repairErr) {
-          console.error("Research agent truncation repair failed:", repairErr.message);
+        } catch (repairErr: unknown) {
+          console.error("Research agent truncation repair failed:", (repairErr as Error).message);
         }
       }
     }
@@ -125,10 +145,10 @@ Respond with a JSON array of evidence items. JSON only, no markdown.`,
     const match = rawText.match(/\[[\s\S]*\]/);
     if (match) {
       try {
-        const result = JSON.parse(match[0]);
-        return { result, trace: { ...trace, parsedOutput: { evidenceCount: result.length }, parseWarning: "Extracted via regex fallback" } };
-      } catch (parseErr) {
-        console.error("Research agent regex fallback parse error:", parseErr.message);
+        const result: EvidenceItem[] = JSON.parse(match[0]);
+        return { result, trace: { ...trace, parsedOutput: { evidenceCount: result.length }, parseWarning: "Extracted via regex fallback" } as TraceData };
+      } catch (parseErr: unknown) {
+        console.error("Research agent regex fallback parse error:", (parseErr as Error).message);
       }
     }
 
@@ -136,11 +156,11 @@ Respond with a JSON array of evidence items. JSON only, no markdown.`,
     const preview = rawText.slice(0, 300);
     const error = new Error(
       `Research agent failed to produce valid JSON array. ` +
-      `Parse error: ${e.message}. ` +
+      `Parse error: ${parseError.message}. ` +
       `Stop reason: ${stopReason || "unknown"}. ` +
       `Response preview: ${preview}${rawText.length > 300 ? "..." : ""}`
-    );
-    error.agentTrace = trace;
+    ) as PipelineError;
+    error.agentTrace = trace as TraceData;
     error.rawOutput = rawText;
     throw error;
   }
@@ -150,8 +170,8 @@ Respond with a JSON array of evidence items. JSON only, no markdown.`,
  * Attempt to repair truncated JSON by closing all open brackets and braces.
  * This handles the common case where the model hits max_tokens mid-output.
  */
-function repairTruncatedJson(text) {
-  const candidates = [
+function repairTruncatedJson(text: string): string | null {
+  const candidates: string[] = [
     text,
     // Strip trailing incomplete string (unmatched quote at end)
     text.replace(/,?\s*"[^"]*$/, ""),
@@ -164,7 +184,7 @@ function repairTruncatedJson(text) {
   for (const candidate of candidates) {
     if (!candidate || candidate.length < 2) continue;
 
-    const closers = [];
+    const closers: string[] = [];
     let inString = false;
     let escape = false;
 

@@ -11,4 +11,4 @@ RUN npm run build
 ENV NODE_ENV=production
 EXPOSE 3001
 
-CMD ["node", "server/index.js"]
+CMD ["node", "--import", "tsx", "server/index.ts"]

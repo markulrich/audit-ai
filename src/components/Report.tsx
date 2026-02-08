@@ -1,5 +1,16 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import ReportDetails from "./ReportDetails.jsx";
+import { useState, useRef, useEffect, useCallback, useMemo, type ReactNode, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import type {
+  Report as ReportData,
+  Finding,
+  Section,
+  ContentItem,
+  EvidenceItem,
+  TraceEvent,
+  KeyStat,
+  MethodologyData,
+  Explanation,
+} from "../../shared/types";
+import ReportDetails from "./ReportDetails";
 
 // ─── Styles ────────────────────────────────────────────────────────────────────
 
@@ -15,24 +26,65 @@ const COLORS = {
   orange: "#b45309",
   red: "#b91c1c",
   panelBg: "#f7f7fa",
-};
+} as const;
 
-function getCertaintyColor(c) {
+function getCertaintyColor(c: number): string {
   if (c > 90) return COLORS.green;
   if (c >= 50) return COLORS.orange;
   return COLORS.red;
 }
 
-function getCertaintyLabel(c) {
+function getCertaintyLabel(c: number): string {
   if (c > 90) return "High";
   if (c >= 75) return "Moderate-High";
   if (c >= 50) return "Moderate";
   return "Low";
 }
 
+// ─── Prop Interfaces ────────────────────────────────────────────────────────────
+
+interface CertaintyBadgeProps {
+  value: number;
+  large?: boolean;
+}
+
+interface FindingSpanProps {
+  finding: Finding;
+  isActive: boolean;
+  onActivate: (id: string) => void;
+}
+
+interface EvidenceSectionProps {
+  title: string;
+  items: EvidenceItem[] | undefined;
+  color: string;
+}
+
+interface FeedbackWidgetProps {
+  findingId: string;
+}
+
+interface ExplanationPanelProps {
+  activeData: Finding | { explanation: Partial<Explanation> } | null;
+  isOverview: boolean;
+  findingIndex: number;
+  total: number;
+  onNavigate: (dir: number) => void;
+  overallCertainty: number;
+  findingsCount: number;
+  overviewData: MethodologyData | undefined;
+}
+
+interface ReportProps {
+  data: ReportData;
+  traceData: TraceEvent[];
+  onBack: () => void;
+  publishedSlug?: string | null;
+}
+
 // ─── Sub-components ────────────────────────────────────────────────────────────
 
-function CertaintyBadge({ value, large }) {
+function CertaintyBadge({ value, large }: CertaintyBadgeProps) {
   const color = getCertaintyColor(value);
   return (
     <span
@@ -58,9 +110,9 @@ function CertaintyBadge({ value, large }) {
   );
 }
 
-function FindingSpan({ finding, isActive, onActivate }) {
+function FindingSpan({ finding, isActive, onActivate }: FindingSpanProps) {
   const [hovered, setHovered] = useState(false);
-  const color = getCertaintyColor(finding.certainty);
+  const color = getCertaintyColor(finding.certainty ?? 50);
   const active = isActive || hovered;
 
   return (
@@ -71,7 +123,7 @@ function FindingSpan({ finding, isActive, onActivate }) {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onClick={() => onActivate(finding.id)}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onActivate(finding.id); } }}
+      onKeyDown={(e: ReactKeyboardEvent<HTMLSpanElement>) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onActivate(finding.id); } }}
       style={{
         cursor: "pointer",
         position: "relative",
@@ -101,7 +153,7 @@ function FindingSpan({ finding, isActive, onActivate }) {
   );
 }
 
-function EvidenceSection({ title, items, color }) {
+function EvidenceSection({ title, items, color }: EvidenceSectionProps) {
   if (!items || items.length === 0) return null;
   return (
     <div style={{ marginTop: 14 }}>
@@ -117,7 +169,7 @@ function EvidenceSection({ title, items, color }) {
       >
         {title} ({items.length})
       </div>
-      {items.map((ev, i) => (
+      {items.map((ev: EvidenceItem, i: number) => (
         <div
           key={i}
           style={{
@@ -151,8 +203,8 @@ function EvidenceSection({ title, items, color }) {
   );
 }
 
-function FeedbackWidget({ findingId }) {
-  const [feedback, setFeedback] = useState(null);
+function FeedbackWidget({ findingId }: FeedbackWidgetProps) {
+  const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
   const [showTextarea, setShowTextarea] = useState(false);
   const [feedbackText, setFeedbackText] = useState("");
   const [submitted, setSubmitted] = useState(false);
@@ -209,7 +261,7 @@ function FeedbackWidget({ findingId }) {
         <div style={{ marginTop: 8 }}>
           <textarea
             value={feedbackText}
-            onChange={(e) => setFeedbackText(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setFeedbackText(e.target.value)}
             placeholder={feedback === "up" ? "What was helpful?" : "What could be improved?"}
             aria-label="Feedback details"
             style={{
@@ -262,12 +314,12 @@ function FeedbackWidget({ findingId }) {
   );
 }
 
-function ExplanationPanel({ activeData, isOverview, findingIndex, total, onNavigate, overallCertainty, findingsCount, overviewData }) {
+function ExplanationPanel({ activeData, isOverview, findingIndex, total, onNavigate, overallCertainty, findingsCount, overviewData }: ExplanationPanelProps) {
   if (!activeData) return null;
 
-  const certainty = isOverview ? overallCertainty : activeData.certainty;
+  const certainty = isOverview ? overallCertainty : (activeData as Finding).certainty;
   const expl = activeData.explanation;
-  const id = isOverview ? "overview" : activeData.id;
+  const id = isOverview ? "overview" : (activeData as Finding).id;
 
   return (
     <div
@@ -361,8 +413,8 @@ function ExplanationPanel({ activeData, isOverview, findingIndex, total, onNavig
           <>
             <div
               style={{
-                background: getCertaintyColor(certainty) + "08",
-                border: `1px solid ${getCertaintyColor(certainty)}20`,
+                background: getCertaintyColor(certainty ?? 50) + "08",
+                border: `1px solid ${getCertaintyColor(certainty ?? 50)}20`,
                 borderRadius: 4,
                 padding: "6px 10px",
                 marginBottom: 14,
@@ -372,7 +424,7 @@ function ExplanationPanel({ activeData, isOverview, findingIndex, total, onNavig
                 lineHeight: 1.5,
               }}
             >
-              Finding: &ldquo;{activeData.text}&rdquo;
+              Finding: &ldquo;{(activeData as Finding).text}&rdquo;
             </div>
             <p style={{ fontSize: 13, lineHeight: 1.75, color: COLORS.textSecondary, margin: "0 0 4px", whiteSpace: "pre-wrap" }}>
               {expl?.text}
@@ -390,7 +442,7 @@ function ExplanationPanel({ activeData, isOverview, findingIndex, total, onNavig
 
 // ─── Section title prettifier ──────────────────────────────────────────────────
 
-const SECTION_TITLES = {
+const SECTION_TITLES: Record<string, string> = {
   investment_thesis: "Investment Thesis",
   thesis: "Investment Thesis",
   recent_price_action: "Recent Price Action",
@@ -413,8 +465,8 @@ const SECTION_TITLES = {
 
 const MOBILE_BREAKPOINT = 768;
 
-function useIsMobile() {
-  const [isMobile, setIsMobile] = useState(
+function useIsMobile(): boolean {
+  const [isMobile, setIsMobile] = useState<boolean>(
     typeof window !== "undefined" ? window.innerWidth < MOBILE_BREAKPOINT : false
   );
   useEffect(() => {
@@ -427,14 +479,14 @@ function useIsMobile() {
 
 // ─── Main Report Component ─────────────────────────────────────────────────────
 
-export default function Report({ data, traceData, onBack, publishedSlug }) {
-  const [activeId, setActiveId] = useState("overview");
-  const [showPanel, setShowPanel] = useState(false); // for mobile panel toggle
-  const [showDetails, setShowDetails] = useState(false);
-  const [publishState, setPublishState] = useState(publishedSlug ? "done" : "idle"); // idle | publishing | done | error
-  const [publishedUrl, setPublishedUrl] = useState(publishedSlug ? `/reports/${publishedSlug}` : null);
-  const [publishError, setPublishError] = useState(null);
-  const panelRef = useRef(null);
+export default function Report({ data, traceData, onBack, publishedSlug }: ReportProps) {
+  const [activeId, setActiveId] = useState<string>("overview");
+  const [showPanel, setShowPanel] = useState<boolean>(false); // for mobile panel toggle
+  const [showDetails, setShowDetails] = useState<boolean>(false);
+  const [publishState, setPublishState] = useState<"idle" | "publishing" | "done" | "error">(publishedSlug ? "done" : "idle");
+  const [publishedUrl, setPublishedUrl] = useState<string | null>(publishedSlug ? `/reports/${publishedSlug}` : null);
+  const [publishError, setPublishError] = useState<string | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
 
   const handlePublish = async () => {
@@ -453,7 +505,8 @@ export default function Report({ data, traceData, onBack, publishedSlug }) {
       const result = await res.json();
       setPublishedUrl(result.url);
       setPublishState("done");
-    } catch (err) {
+    } catch (thrown: unknown) {
+      const err = thrown instanceof Error ? thrown : new Error(String(thrown));
       setPublishError(err.message);
       setPublishState("error");
     }
@@ -462,25 +515,25 @@ export default function Report({ data, traceData, onBack, publishedSlug }) {
   const { meta, sections, findings } = data;
 
   // Guard: empty findings
-  const safeFindings = useMemo(() => Array.isArray(findings) ? findings : [], [findings]);
-  const safeSections = useMemo(() => Array.isArray(sections) ? sections : [], [sections]);
+  const safeFindings = useMemo<Finding[]>(() => Array.isArray(findings) ? findings : [], [findings]);
+  const safeSections = useMemo<Section[]>(() => Array.isArray(sections) ? sections : [], [sections]);
 
   // Build a lookup map
-  const findingsMap = useMemo(() => {
-    const map = {};
+  const findingsMap = useMemo<Record<string, Finding>>(() => {
+    const map: Record<string, Finding> = {};
     safeFindings.forEach((f) => { map[f.id] = f; });
     return map;
   }, [safeFindings]);
 
-  const overallCertainty = useMemo(() => meta?.overallCertainty || (
+  const overallCertainty = useMemo<number>(() => meta?.overallCertainty || (
     safeFindings.length > 0
       ? Math.round(safeFindings.reduce((s, f) => s + (f.certainty || 50), 0) / safeFindings.length)
       : 0
   ), [meta?.overallCertainty, safeFindings]);
 
   const isOverview = activeId === "overview";
-  const activeFinding = isOverview ? null : findingsMap[activeId] || null;
-  const activeIndex = isOverview ? -1 : safeFindings.findIndex((f) => f.id === activeId);
+  const activeFinding: Finding | null = isOverview ? null : findingsMap[activeId] || null;
+  const activeIndex: number = isOverview ? -1 : safeFindings.findIndex((f) => f.id === activeId);
 
   // Update browser tab title
   useEffect(() => {
@@ -490,13 +543,13 @@ export default function Report({ data, traceData, onBack, publishedSlug }) {
   }, [meta?.title]);
 
   // On mobile, show panel when a finding is activated
-  const handleActivate = useCallback((id) => {
+  const handleActivate = useCallback((id: string) => {
     setActiveId(id);
     if (isMobile) setShowPanel(true);
   }, [isMobile]);
 
   const navigate = useCallback(
-    (dir) => {
+    (dir: number) => {
       if (isOverview) {
         if (dir > 0 && safeFindings.length > 0) setActiveId(safeFindings[0].id);
         return;
@@ -511,7 +564,7 @@ export default function Report({ data, traceData, onBack, publishedSlug }) {
 
   // Keyboard navigation — skip when a textarea/input is focused
   useEffect(() => {
-    const handler = (e) => {
+    const handler = (e: globalThis.KeyboardEvent) => {
       const tag = document.activeElement?.tagName?.toLowerCase();
       if (tag === "textarea" || tag === "input" || tag === "select") return;
 
@@ -527,15 +580,15 @@ export default function Report({ data, traceData, onBack, publishedSlug }) {
   }, [navigate, isMobile, showPanel]);
 
   const overallColor = getCertaintyColor(overallCertainty);
-  const keyStats = meta?.keyStats || [];
+  const keyStats: KeyStat[] = meta?.keyStats || [];
 
   // Filter sections that have at least one valid finding
-  const visibleSections = useMemo(() => safeSections.filter((s) =>
-    (s.content || []).some((item) => item.type === "finding" && findingsMap[item.id])
+  const visibleSections = useMemo<Section[]>(() => safeSections.filter((s) =>
+    (s.content || []).some((item) => item.type === "finding" && findingsMap[(item as { id: string }).id])
   ), [safeSections, findingsMap]);
 
   // Render a content block (finding or text)
-  const renderContent = (item, i) => {
+  const renderContent = (item: ContentItem, i: number): ReactNode => {
     if (item.type === "finding") {
       const f = findingsMap[item.id];
       if (!f) return null;
@@ -548,9 +601,9 @@ export default function Report({ data, traceData, onBack, publishedSlug }) {
   };
 
   // Split a section's content array into paragraphs on { type: "break" } nodes
-  const splitIntoParagraphs = (content) => {
-    const paragraphs = [];
-    let current = [];
+  const splitIntoParagraphs = (content: ContentItem[] | undefined): ContentItem[][] => {
+    const paragraphs: ContentItem[][] = [];
+    let current: ContentItem[] = [];
     for (const item of content || []) {
       if (item.type === "break") {
         if (current.length > 0) { paragraphs.push(current); current = []; }
@@ -736,7 +789,7 @@ export default function Report({ data, traceData, onBack, publishedSlug }) {
             role="button"
             tabIndex={0}
             aria-label={`Overall report certainty: ${overallCertainty}%. Click for methodology.`}
-            onKeyDown={(e) => { if (e.key === "Enter") handleActivate("overview"); }}
+            onKeyDown={(e: ReactKeyboardEvent<HTMLDivElement>) => { if (e.key === "Enter") handleActivate("overview"); }}
             style={{
               cursor: "pointer",
               display: "flex",
@@ -852,7 +905,7 @@ export default function Report({ data, traceData, onBack, publishedSlug }) {
                 flexWrap: isMobile ? "wrap" : "nowrap",
               }}
             >
-              {keyStats.map((item, i) => (
+              {keyStats.map((item: KeyStat, i: number) => (
                 <div
                   key={i}
                   style={{
@@ -920,7 +973,7 @@ export default function Report({ data, traceData, onBack, publishedSlug }) {
           </div>
 
           {/* ── Dynamic Sections ── */}
-          {visibleSections.map((section) => {
+          {visibleSections.map((section: Section) => {
             const paragraphs = splitIntoParagraphs(section.content);
             return (
               <div key={section.id}>
@@ -938,9 +991,9 @@ export default function Report({ data, traceData, onBack, publishedSlug }) {
                 >
                   {SECTION_TITLES[section.id] || section.title || section.id}
                 </h2>
-                {paragraphs.map((paraItems, pi) => (
+                {paragraphs.map((paraItems: ContentItem[], pi: number) => (
                   <p key={pi} style={{ fontSize: 14, lineHeight: 1.85, color: COLORS.textSecondary, margin: "0 0 14px" }}>
-                    {paraItems.map((item, i) => renderContent(item, i))}
+                    {paraItems.map((item: ContentItem, i: number) => renderContent(item, i))}
                   </p>
                 ))}
               </div>

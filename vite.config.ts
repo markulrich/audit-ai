@@ -7,7 +7,7 @@ export default defineConfig({
     include: ["src/**/*.{test,spec}.{js,jsx,ts,tsx}"],
     globals: true,
     environment: "jsdom",
-    setupFiles: "./test/setup.js",
+    setupFiles: "./test/setup.ts",
     css: true,
     exclude: ["src/**/*.browser.test.{js,jsx,ts,tsx}"],
   },
@@ -22,5 +22,6 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
+    target: "es2022",
   },
 });

@@ -4,15 +4,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "concurrently \"vite\" \"node --env-file=.env --watch server/index.js\"",
+    "dev": "concurrently \"vite\" \"tsx --env-file=.env --watch server/index.ts\"",
     "build": "vite build",
-    "start": "NODE_ENV=production node server/index.js",
+    "start": "NODE_ENV=production node --import tsx server/index.ts",
     "preview": "vite preview",
+    "typecheck": "tsc -b",
     "test": "vitest run",
     "test:watch": "vitest --watch",
-    "test:browser": "vitest run --config vitest.browser.config.js",
-    "test:server": "vitest run --config vitest.server.config.js",
-    "test:ci": "npm run test && npm run test:server && npm run test:browser"
+    "test:browser": "vitest run --config vitest.browser.config.ts",
+    "test:server": "vitest run --config vitest.server.config.ts",
+    "test:ci": "npm run typecheck && npm run test && npm run test:server && npm run test:browser"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
@@ -25,12 +26,18 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.2.2",
+    "@types/react": "^19.2.13",
+    "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.3.0",
     "@vitest/browser": "^4.0.18",
     "@vitest/browser-playwright": "^4.0.18",
     "concurrently": "^9.1.0",
     "jsdom": "^28.0.0",
     "playwright": "^1.58.2",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
     "vite": "^6.0.0",
     "vitest": "^4.0.18"
   }

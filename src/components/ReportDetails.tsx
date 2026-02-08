@@ -1,4 +1,71 @@
 import { useState } from "react";
+import type { TraceEvent, TraceData, EvidenceItem, Finding, Report } from "../../shared/types";
+
+// ─── Local Interfaces ────────────────────────────────────────────────────────
+
+interface StageMeta {
+  label: string;
+  description: string;
+  color: string;
+}
+
+interface CollapsibleSectionProps {
+  title: string;
+  subtitle?: string;
+  color?: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}
+
+interface TabBarProps {
+  tabs: Array<{ id: string; label: string }>;
+  activeTab: string;
+  onTabChange: (id: string) => void;
+}
+
+interface CodeBlockProps {
+  content: string | object;
+  maxHeight?: number;
+}
+
+interface StatRowProps {
+  label: string;
+  value: string | number;
+  color?: string;
+}
+
+interface AgentTracePanelProps {
+  traceEvent: TraceEvent;
+}
+
+interface EvidenceExplorerProps {
+  evidence: EvidenceItem[];
+}
+
+interface FindingsDiffProps {
+  draft: Report | null;
+  verifierTrace: TraceData | null;
+}
+
+interface ReportDetailsProps {
+  traceData: TraceEvent[];
+  onClose: () => void;
+}
+
+interface CertaintySummaryItem {
+  id: string;
+  certainty: number;
+  contraryCount?: number;
+}
+
+interface PipelineSummaryOutput {
+  query?: string;
+  totalStages?: number;
+  totalFindings?: number;
+  avgCertainty?: number;
+}
+
+// ─── Constants ───────────────────────────────────────────────────────────────
 
 const COLORS = {
   bg: "#fafafa",
@@ -14,9 +81,9 @@ const COLORS = {
   panelBg: "#f7f7fa",
   codeBg: "#1e1e2e",
   codeText: "#cdd6f4",
-};
+} as const;
 
-const STAGE_META = {
+const STAGE_META: Record<string, StageMeta> = {
   classifier: {
     label: "Stage 1: Classifier",
     description: "Identifies domain, extracts ticker/company, determines focus areas",
@@ -46,8 +113,8 @@ const STAGE_META = {
 
 // ─── Reusable sub-components ─────────────────────────────────────────────────
 
-function CollapsibleSection({ title, subtitle, color, defaultOpen, children }) {
-  const [open, setOpen] = useState(defaultOpen || false);
+function CollapsibleSection({ title, subtitle, color, defaultOpen, children }: CollapsibleSectionProps) {
+  const [open, setOpen] = useState<boolean>(defaultOpen || false);
   return (
     <div
       style={{
@@ -99,7 +166,7 @@ function CollapsibleSection({ title, subtitle, color, defaultOpen, children }) {
   );
 }
 
-function TabBar({ tabs, activeTab, onTabChange }) {
+function TabBar({ tabs, activeTab, onTabChange }: TabBarProps) {
   return (
     <div
       style={{
@@ -137,11 +204,11 @@ function TabBar({ tabs, activeTab, onTabChange }) {
   );
 }
 
-function CodeBlock({ content, maxHeight }) {
-  const [copied, setCopied] = useState(false);
-  const text = typeof content === "string" ? content : JSON.stringify(content, null, 2);
+function CodeBlock({ content, maxHeight }: CodeBlockProps) {
+  const [copied, setCopied] = useState<boolean>(false);
+  const text: string = typeof content === "string" ? content : JSON.stringify(content, null, 2);
 
-  const handleCopy = () => {
+  const handleCopy = (): void => {
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
@@ -191,7 +258,7 @@ function CodeBlock({ content, maxHeight }) {
   );
 }
 
-function StatRow({ label, value, color }) {
+function StatRow({ label, value, color }: StatRowProps) {
   return (
     <div
       style={{
@@ -212,12 +279,12 @@ function StatRow({ label, value, color }) {
 
 // ─── Agent Trace Panel ──────────────────────────────────────────────────────
 
-function AgentTracePanel({ traceEvent }) {
-  const [activeTab, setActiveTab] = useState("overview");
+function AgentTracePanel({ traceEvent }: AgentTracePanelProps) {
+  const [activeTab, setActiveTab] = useState<string>("overview");
   const { stage, agent, trace, intermediateOutput } = traceEvent;
-  const meta = STAGE_META[stage] || { label: agent, description: "", color: COLORS.accent };
+  const meta: StageMeta = STAGE_META[stage] || { label: agent, description: "", color: COLORS.accent };
 
-  const tabs = [
+  const tabs: Array<{ id: string; label: string }> = [
     { id: "overview", label: "Overview" },
     { id: "system_prompt", label: "System Prompt" },
     { id: "user_message", label: "User Message" },
@@ -227,23 +294,27 @@ function AgentTracePanel({ traceEvent }) {
 
   // Pipeline summary doesn't have LLM call data
   if (stage === "pipeline_summary") {
+    const summaryOutput = intermediateOutput as PipelineSummaryOutput | undefined;
     return (
       <div>
         <StatRow
           label="Total Pipeline Duration"
-          value={`${(trace.timing?.durationMs / 1000).toFixed(1)}s`}
+          value={`${((trace.timing?.durationMs ?? 0) / 1000).toFixed(1)}s`}
         />
-        {intermediateOutput && (
+        {summaryOutput && (
           <>
-            <StatRow label="Query" value={intermediateOutput.query} />
-            <StatRow label="Total Stages" value={intermediateOutput.totalStages} />
-            <StatRow label="Total Findings" value={intermediateOutput.totalFindings} />
-            <StatRow label="Avg Certainty" value={`${intermediateOutput.avgCertainty}%`} />
+            <StatRow label="Query" value={summaryOutput.query ?? "N/A"} />
+            <StatRow label="Total Stages" value={summaryOutput.totalStages ?? "N/A"} />
+            <StatRow label="Total Findings" value={summaryOutput.totalFindings ?? "N/A"} />
+            <StatRow label="Avg Certainty" value={`${summaryOutput.avgCertainty ?? "N/A"}%`} />
           </>
         )}
       </div>
     );
   }
+
+  const parsedOutput = trace.parsedOutput as Record<string, unknown> | undefined;
+  const certaintySummary = parsedOutput?.certaintySummary as CertaintySummaryItem[] | undefined;
 
   return (
     <div>
@@ -268,11 +339,11 @@ function AgentTracePanel({ traceEvent }) {
           />
           <StatRow
             label="Max Tokens"
-            value={(trace.request?.max_tokens || 0).toLocaleString()}
+            value={(Number(trace.request?.max_tokens) || 0).toLocaleString()}
           />
           <StatRow
             label="Duration"
-            value={`${(trace.timing?.durationMs / 1000).toFixed(1)}s`}
+            value={`${((trace.timing?.durationMs ?? 0) / 1000).toFixed(1)}s`}
           />
           <StatRow
             label="Input Tokens"
@@ -307,7 +378,7 @@ function AgentTracePanel({ traceEvent }) {
           )}
 
           {/* Show summary stats for specific agents */}
-          {trace.parsedOutput && (
+          {parsedOutput && (
             <div style={{ marginTop: 12 }}>
               <div
                 style={{
@@ -321,12 +392,12 @@ function AgentTracePanel({ traceEvent }) {
               >
                 Agent Output Summary
               </div>
-              {Object.entries(trace.parsedOutput).map(([key, val]) => {
+              {Object.entries(parsedOutput).map(([key, val]: [string, unknown]) => {
                 if (typeof val === "object" && !Array.isArray(val)) return null;
                 return (
                   <StatRow
                     key={key}
-                    label={key.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase())}
+                    label={key.replace(/([A-Z])/g, " $1").replace(/^./, (c: string) => c.toUpperCase())}
                     value={Array.isArray(val) ? `[${val.length} items] ${val.join(", ")}` : String(val)}
                   />
                 );
@@ -335,7 +406,7 @@ function AgentTracePanel({ traceEvent }) {
           )}
 
           {/* Certainty summary table for verifier */}
-          {trace.parsedOutput?.certaintySummary && (
+          {certaintySummary && (
             <div style={{ marginTop: 12 }}>
               <div
                 style={{
@@ -357,7 +428,7 @@ function AgentTracePanel({ traceEvent }) {
                   fontSize: 11,
                 }}
               >
-                {trace.parsedOutput.certaintySummary.map((f) => (
+                {certaintySummary.map((f: CertaintySummaryItem) => (
                   <div key={f.id} style={{ display: "contents" }}>
                     <span style={{ fontFamily: "monospace", color: COLORS.textMuted }}>{f.id}</span>
                     <div
@@ -425,7 +496,7 @@ function AgentTracePanel({ traceEvent }) {
       {activeTab === "parsed" && (
         <div>
           {intermediateOutput ? (
-            <CodeBlock content={intermediateOutput} maxHeight={800} />
+            <CodeBlock content={intermediateOutput as string | object} maxHeight={800} />
           ) : (
             <div style={{ fontSize: 12, color: COLORS.textMuted, fontStyle: "italic" }}>
               Final report output — see the report view.
@@ -439,19 +510,19 @@ function AgentTracePanel({ traceEvent }) {
 
 // ─── Evidence Explorer ──────────────────────────────────────────────────────
 
-function EvidenceExplorer({ evidence }) {
-  const [filter, setFilter] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("all");
+function EvidenceExplorer({ evidence }: EvidenceExplorerProps) {
+  const [filter, setFilter] = useState<string>("");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
 
   if (!Array.isArray(evidence)) return null;
 
-  const categories = [...new Set(evidence.map((e) => e.category).filter(Boolean))];
-  const filtered = evidence.filter((ev) => {
-    const matchesText =
+  const categories: string[] = [...new Set(evidence.map((e: EvidenceItem) => e.category).filter(Boolean))] as string[];
+  const filtered: EvidenceItem[] = evidence.filter((ev: EvidenceItem) => {
+    const matchesText: boolean =
       !filter ||
       ev.source?.toLowerCase().includes(filter.toLowerCase()) ||
       ev.quote?.toLowerCase().includes(filter.toLowerCase());
-    const matchesCat = categoryFilter === "all" || ev.category === categoryFilter;
+    const matchesCat: boolean = categoryFilter === "all" || ev.category === categoryFilter;
     return matchesText && matchesCat;
   });
 
@@ -462,7 +533,7 @@ function EvidenceExplorer({ evidence }) {
           type="text"
           placeholder="Filter evidence..."
           value={filter}
-          onChange={(e) => setFilter(e.target.value)}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFilter(e.target.value)}
           style={{
             flex: 1,
             minWidth: 150,
@@ -476,7 +547,7 @@ function EvidenceExplorer({ evidence }) {
         />
         <select
           value={categoryFilter}
-          onChange={(e) => setCategoryFilter(e.target.value)}
+          onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setCategoryFilter(e.target.value)}
           style={{
             padding: "5px 10px",
             fontSize: 12,
@@ -487,9 +558,9 @@ function EvidenceExplorer({ evidence }) {
           }}
         >
           <option value="all">All categories ({evidence.length})</option>
-          {categories.map((cat) => (
+          {categories.map((cat: string) => (
             <option key={cat} value={cat}>
-              {cat} ({evidence.filter((e) => e.category === cat).length})
+              {cat} ({evidence.filter((e: EvidenceItem) => e.category === cat).length})
             </option>
           ))}
         </select>
@@ -498,7 +569,7 @@ function EvidenceExplorer({ evidence }) {
         Showing {filtered.length} of {evidence.length} evidence items
       </div>
       <div style={{ maxHeight: 500, overflow: "auto" }}>
-        {filtered.map((ev, i) => (
+        {filtered.map((ev: EvidenceItem, i: number) => (
           <div
             key={i}
             style={{
@@ -545,13 +616,14 @@ function EvidenceExplorer({ evidence }) {
 
 // ─── Findings Diff (pre-verification vs post-verification) ─────────────────
 
-function FindingsDiff({ draft, verifierTrace }) {
+function FindingsDiff({ draft, verifierTrace }: FindingsDiffProps) {
   if (!draft?.findings || !verifierTrace?.parsedOutput) return null;
 
-  const removedIds = verifierTrace.parsedOutput.removedFindings || [];
-  const certaintySummary = verifierTrace.parsedOutput.certaintySummary || [];
-  const certMap = {};
-  certaintySummary.forEach((c) => { certMap[c.id] = c; });
+  const removedIds: string[] = (verifierTrace.parsedOutput.removedFindings as string[]) || [];
+  const certaintySummary: CertaintySummaryItem[] =
+    (verifierTrace.parsedOutput.certaintySummary as CertaintySummaryItem[]) || [];
+  const certMap: Record<string, CertaintySummaryItem> = {};
+  certaintySummary.forEach((c: CertaintySummaryItem) => { certMap[c.id] = c; });
 
   return (
     <div>
@@ -565,9 +637,9 @@ function FindingsDiff({ draft, verifierTrace }) {
       </div>
 
       <div style={{ maxHeight: 500, overflow: "auto" }}>
-        {draft.findings.map((f) => {
-          const removed = removedIds.includes(f.id);
-          const cert = certMap[f.id];
+        {draft.findings.map((f: Finding) => {
+          const removed: boolean = removedIds.includes(f.id);
+          const cert: CertaintySummaryItem | undefined = certMap[f.id];
 
           return (
             <div
@@ -616,7 +688,7 @@ function FindingsDiff({ draft, verifierTrace }) {
                       }}
                     >
                       {cert.certainty}%
-                      {cert.contraryCount > 0 && (
+                      {cert.contraryCount != null && cert.contraryCount > 0 && (
                         <span style={{ color: COLORS.orange, marginLeft: 4 }}>
                           ({cert.contraryCount} contrary)
                         </span>
@@ -639,7 +711,7 @@ function FindingsDiff({ draft, verifierTrace }) {
 
 // ─── Main ReportDetails Component ───────────────────────────────────────────
 
-export default function ReportDetails({ traceData, onClose }) {
+export default function ReportDetails({ traceData, onClose }: ReportDetailsProps) {
   if (!traceData || traceData.length === 0) {
     return (
       <div style={{ padding: 40, textAlign: "center", color: COLORS.textMuted }}>
@@ -649,26 +721,26 @@ export default function ReportDetails({ traceData, onClose }) {
   }
 
   // Organize trace events by stage
-  const traceByStage = {};
-  traceData.forEach((t) => { traceByStage[t.stage] = t; });
+  const traceByStage: Record<string, TraceEvent> = {};
+  traceData.forEach((t: TraceEvent) => { traceByStage[t.stage] = t; });
 
-  const classifierTrace = traceByStage.classifier;
-  const researcherTrace = traceByStage.researcher;
-  const synthesizerTrace = traceByStage.synthesizer;
-  const verifierTrace = traceByStage.verifier;
-  const pipelineSummary = traceByStage.pipeline_summary;
+  const classifierTrace: TraceEvent | undefined = traceByStage.classifier;
+  const researcherTrace: TraceEvent | undefined = traceByStage.researcher;
+  const synthesizerTrace: TraceEvent | undefined = traceByStage.synthesizer;
+  const verifierTrace: TraceEvent | undefined = traceByStage.verifier;
+  const pipelineSummary: TraceEvent | undefined = traceByStage.pipeline_summary;
 
   // Extract intermediate outputs for specialized views
-  const evidence = researcherTrace?.intermediateOutput;
-  const draft = synthesizerTrace?.intermediateOutput;
+  const evidence = researcherTrace?.intermediateOutput as EvidenceItem[] | undefined;
+  const draft = synthesizerTrace?.intermediateOutput as Report | undefined;
 
   // Compute total token usage across all stages
-  const totalInputTokens = traceData.reduce(
-    (sum, t) => sum + (t.trace?.response?.usage?.input_tokens || 0),
+  const totalInputTokens: number = traceData.reduce(
+    (sum: number, t: TraceEvent) => sum + (t.trace?.response?.usage?.input_tokens || 0),
     0
   );
-  const totalOutputTokens = traceData.reduce(
-    (sum, t) => sum + (t.trace?.response?.usage?.output_tokens || 0),
+  const totalOutputTokens: number = traceData.reduce(
+    (sum: number, t: TraceEvent) => sum + (t.trace?.response?.usage?.output_tokens || 0),
     0
   );
 
@@ -747,7 +819,7 @@ export default function ReportDetails({ traceData, onClose }) {
               {
                 label: "Total Duration",
                 value: pipelineSummary
-                  ? `${(pipelineSummary.trace.timing.durationMs / 1000).toFixed(1)}s`
+                  ? `${((pipelineSummary.trace.timing?.durationMs ?? 0) / 1000).toFixed(1)}s`
                   : "N/A",
               },
               { label: "Input Tokens", value: totalInputTokens.toLocaleString() },
@@ -758,13 +830,13 @@ export default function ReportDetails({ traceData, onClose }) {
               },
               {
                 label: "LLM Calls",
-                value: traceData.filter((t) => t.stage !== "pipeline_summary").length,
+                value: traceData.filter((t: TraceEvent) => t.stage !== "pipeline_summary").length,
               },
               {
                 label: "Findings",
-                value: pipelineSummary?.intermediateOutput?.totalFindings ?? "N/A",
+                value: (pipelineSummary?.intermediateOutput as PipelineSummaryOutput | undefined)?.totalFindings ?? "N/A",
               },
-            ].map((stat, i) => (
+            ].map((stat: { label: string; value: string | number }, i: number) => (
               <div
                 key={i}
                 style={{
@@ -798,7 +870,7 @@ export default function ReportDetails({ traceData, onClose }) {
           {classifierTrace && (
             <CollapsibleSection
               title={STAGE_META.classifier.label}
-              subtitle={`${(classifierTrace.trace.timing?.durationMs / 1000).toFixed(1)}s | ${(classifierTrace.trace.response?.usage?.input_tokens || 0).toLocaleString()} in / ${(classifierTrace.trace.response?.usage?.output_tokens || 0).toLocaleString()} out tokens`}
+              subtitle={`${((classifierTrace.trace.timing?.durationMs ?? 0) / 1000).toFixed(1)}s | ${(classifierTrace.trace.response?.usage?.input_tokens || 0).toLocaleString()} in / ${(classifierTrace.trace.response?.usage?.output_tokens || 0).toLocaleString()} out tokens`}
               color={STAGE_META.classifier.color}
             >
               <AgentTracePanel traceEvent={classifierTrace} />
@@ -808,7 +880,7 @@ export default function ReportDetails({ traceData, onClose }) {
           {researcherTrace && (
             <CollapsibleSection
               title={STAGE_META.researcher.label}
-              subtitle={`${(researcherTrace.trace.timing?.durationMs / 1000).toFixed(1)}s | ${Array.isArray(evidence) ? evidence.length : 0} evidence items | ${(researcherTrace.trace.response?.usage?.input_tokens || 0).toLocaleString()} in / ${(researcherTrace.trace.response?.usage?.output_tokens || 0).toLocaleString()} out tokens`}
+              subtitle={`${((researcherTrace.trace.timing?.durationMs ?? 0) / 1000).toFixed(1)}s | ${Array.isArray(evidence) ? evidence.length : 0} evidence items | ${(researcherTrace.trace.response?.usage?.input_tokens || 0).toLocaleString()} in / ${(researcherTrace.trace.response?.usage?.output_tokens || 0).toLocaleString()} out tokens`}
               color={STAGE_META.researcher.color}
             >
               <AgentTracePanel traceEvent={researcherTrace} />
@@ -827,7 +899,7 @@ export default function ReportDetails({ traceData, onClose }) {
           {synthesizerTrace && (
             <CollapsibleSection
               title={STAGE_META.synthesizer.label}
-              subtitle={`${(synthesizerTrace.trace.timing?.durationMs / 1000).toFixed(1)}s | ${draft?.findings?.length || 0} findings, ${draft?.sections?.length || 0} sections | ${(synthesizerTrace.trace.response?.usage?.input_tokens || 0).toLocaleString()} in / ${(synthesizerTrace.trace.response?.usage?.output_tokens || 0).toLocaleString()} out tokens`}
+              subtitle={`${((synthesizerTrace.trace.timing?.durationMs ?? 0) / 1000).toFixed(1)}s | ${draft?.findings?.length || 0} findings, ${draft?.sections?.length || 0} sections | ${(synthesizerTrace.trace.response?.usage?.input_tokens || 0).toLocaleString()} in / ${(synthesizerTrace.trace.response?.usage?.output_tokens || 0).toLocaleString()} out tokens`}
               color={STAGE_META.synthesizer.color}
             >
               <AgentTracePanel traceEvent={synthesizerTrace} />
@@ -837,7 +909,7 @@ export default function ReportDetails({ traceData, onClose }) {
           {verifierTrace && (
             <CollapsibleSection
               title={STAGE_META.verifier.label}
-              subtitle={`${(verifierTrace.trace.timing?.durationMs / 1000).toFixed(1)}s | ${verifierTrace.trace.parsedOutput?.findingsCount || "?"} findings retained | ${(verifierTrace.trace.response?.usage?.input_tokens || 0).toLocaleString()} in / ${(verifierTrace.trace.response?.usage?.output_tokens || 0).toLocaleString()} out tokens`}
+              subtitle={`${((verifierTrace.trace.timing?.durationMs ?? 0) / 1000).toFixed(1)}s | ${(verifierTrace.trace.parsedOutput as Record<string, unknown> | undefined)?.findingsCount ?? "?"} findings retained | ${(verifierTrace.trace.response?.usage?.input_tokens || 0).toLocaleString()} in / ${(verifierTrace.trace.response?.usage?.output_tokens || 0).toLocaleString()} out tokens`}
               color={STAGE_META.verifier.color}
             >
               <AgentTracePanel traceEvent={verifierTrace} />
@@ -856,7 +928,7 @@ export default function ReportDetails({ traceData, onClose }) {
           {pipelineSummary && (
             <CollapsibleSection
               title={STAGE_META.pipeline_summary.label}
-              subtitle={`Total: ${(pipelineSummary.trace.timing.durationMs / 1000).toFixed(1)}s`}
+              subtitle={`Total: ${((pipelineSummary.trace.timing?.durationMs ?? 0) / 1000).toFixed(1)}s`}
               color={STAGE_META.pipeline_summary.color}
             >
               <AgentTracePanel traceEvent={pipelineSummary} />
@@ -869,7 +941,7 @@ export default function ReportDetails({ traceData, onClose }) {
             subtitle="Complete JSON dump of all trace events — for copy-pasting"
             color={COLORS.textMuted}
           >
-            <CodeBlock content={traceData} maxHeight={600} />
+            <CodeBlock content={traceData as unknown as object} maxHeight={600} />
           </CollapsibleSection>
         </div>
       </div>

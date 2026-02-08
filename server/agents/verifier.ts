@@ -1,16 +1,28 @@
-import { tracedCreate } from "../anthropic-client.js";
+import { tracedCreate, type CreateMessageParams } from "../anthropic-client";
+import type {
+  DomainProfile,
+  Report,
+  Finding,
+  Section,
+  ContentItem,
+  ReasoningConfig,
+  SendFn,
+  AgentResult,
+  TraceData,
+  PipelineError,
+} from "../../shared/types";
 
 /**
  * Removes finding references from section content arrays when the finding
  * has been deleted (e.g., certainty < 25%). Also collapses adjacent text nodes
  * and removes sections that have no findings left.
  */
-function cleanOrphanedRefs(report) {
+function cleanOrphanedRefs(report: Report): void {
   const findingIds = new Set((report.findings || []).map((f) => f.id));
 
   for (const section of report.sections || []) {
     // Remove orphaned finding refs and collapse adjacent text nodes
-    const cleaned = [];
+    const cleaned: ContentItem[] = [];
     for (const item of section.content || []) {
       if (item.type === "finding" && !findingIds.has(item.id)) continue;
       // Merge adjacent text nodes
@@ -19,7 +31,7 @@ function cleanOrphanedRefs(report) {
         cleaned.length > 0 &&
         cleaned[cleaned.length - 1].type === "text"
       ) {
-        cleaned[cleaned.length - 1].value += item.value;
+        (cleaned[cleaned.length - 1] as Extract<ContentItem, { type: "text" }>).value += item.value;
       } else {
         cleaned.push(item);
       }
@@ -41,7 +53,13 @@ function cleanOrphanedRefs(report) {
  *
  * THIS AGENT'S JOB IS TO LOWER CERTAINTY, NOT RAISE IT.
  */
-export async function verify(query, domainProfile, draft, send, config = {}) {
+export async function verify(
+  query: string,
+  domainProfile: DomainProfile,
+  draft: Report,
+  send: SendFn | undefined,
+  config: Partial<ReasoningConfig> = {}
+): Promise<AgentResult<Report>> {
   const { ticker, companyName } = domainProfile;
   const methodologyLength = config.methodologyLength || "3-5 sentences";
   const methodologySources = config.methodologySources || "3-4";
@@ -143,7 +161,7 @@ The supportingEvidence should list the ${methodologySources} most important sour
 Return the complete report JSON. No markdown fences. No commentary.`,
     messages: [
       {
-        role: "user",
+        role: "user" as const,
         content: `Review this draft equity research report on ${companyName} (${ticker}). Be ruthlessly skeptical. Find every error, every weak claim, every missing caveat.\n\n${JSON.stringify(draft, null, 2)}`,
       },
     ],
@@ -166,22 +184,23 @@ Return the complete report JSON. No markdown fences. No commentary.`,
     });
   }
 
-  const { response, trace } = await tracedCreate(params);
+  const { response, trace } = await tracedCreate(params as CreateMessageParams);
 
   // Track which findings were removed and certainty changes for the trace
   const preFindingIds = new Set((draft.findings || []).map((f) => f.id));
 
   try {
-    const text = response.content?.[0]?.text;
+    const firstBlock = response.content?.[0];
+    const text = firstBlock?.type === "text" ? firstBlock.text : undefined;
     if (!text) throw new Error("Empty verifier response");
     const cleaned = text.replace(/```json\n?|\n?```/g, "").trim();
-    const report = JSON.parse(cleaned);
+    const report: Report = JSON.parse(cleaned);
 
     // Ensure meta and overallCertainty exist
-    if (!report.meta) report.meta = {};
+    if (!report.meta) report.meta = {} as Report["meta"];
     if (!report.meta.overallCertainty && report.findings?.length > 0) {
       report.meta.overallCertainty = Math.round(
-        report.findings.reduce((s, f) => s + (f.certainty || 50), 0) /
+        report.findings.reduce((s: number, f: Finding) => s + (f.certainty || 50), 0) /
           report.findings.length
       );
     }
@@ -211,12 +230,14 @@ Return the complete report JSON. No markdown fences. No commentary.`,
       },
     };
   } catch (e) {
-    console.error("Verification agent parse error:", e.message);
-    const rawText = response.content?.[0]?.text || "";
+    const error = e as PipelineError;
+    console.error("Verification agent parse error:", error.message);
+    const rawFirstBlock = response.content?.[0];
+    const rawText = rawFirstBlock?.type === "text" ? rawFirstBlock.text : "";
     // Try to extract a valid JSON object from the response by finding
     // balanced brace pairs and attempting to parse each one. This avoids
     // the greedy regex pitfall of matching across unrelated braces.
-    let extracted = null;
+    let extracted: any = null;
     for (let i = 0; i < rawText.length; i++) {
       if (rawText[i] !== "{") continue;
       // Find the matching closing brace using depth counting
@@ -248,11 +269,11 @@ Return the complete report JSON. No markdown fences. No commentary.`,
     }
     if (extracted) {
       try {
-        const report = extracted;
-        if (!report.meta) report.meta = {};
+        const report: Report = extracted;
+        if (!report.meta) report.meta = {} as Report["meta"];
         if (!report.meta.overallCertainty && report.findings?.length > 0) {
           report.meta.overallCertainty = Math.round(
-            report.findings.reduce((s, f) => s + (f.certainty || 50), 0) /
+            report.findings.reduce((s: number, f: Finding) => s + (f.certainty || 50), 0) /
               report.findings.length
           );
         }
@@ -262,7 +283,7 @@ Return the complete report JSON. No markdown fences. No commentary.`,
           trace: { ...trace, parseWarning: "Extracted via regex fallback" },
         };
       } catch (parseErr) {
-        console.error("Verification agent regex fallback parse error:", parseErr.message);
+        console.error("Verification agent regex fallback parse error:", (parseErr as PipelineError).message);
       }
     }
     // Last resort: return draft with default certainty scores
@@ -275,11 +296,11 @@ Return the complete report JSON. No markdown fences. No commentary.`,
         contraryEvidence: f.explanation?.contraryEvidence || [],
       },
     }));
-    if (!draft.meta) draft.meta = {};
+    if (!draft.meta) draft.meta = {} as Report["meta"];
     draft.meta.overallCertainty =
       draft.findings.length > 0
         ? Math.round(
-            draft.findings.reduce((s, f) => s + f.certainty, 0) /
+            draft.findings.reduce((s: number, f: Finding) => s + (f.certainty ?? 0), 0) /
               draft.findings.length
           )
         : 0;

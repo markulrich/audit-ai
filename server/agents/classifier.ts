@@ -1,6 +1,24 @@
-import { tracedCreate } from "../anthropic-client.js";
+import { tracedCreate, ANTHROPIC_MODEL } from "../anthropic-client";
+import type { CreateMessageParams } from "../anthropic-client";
+import type {
+  DomainProfileBase,
+  DomainProfile,
+  ReasoningConfig,
+  SendFn,
+  AgentResult,
+  TraceData,
+} from "../../shared/types";
 
-const DOMAIN_PROFILES = {
+/** Shape of the JSON the classifier LLM returns. */
+interface ClassifierResponse {
+  domain: string;
+  ticker?: string;
+  companyName?: string;
+  focusAreas?: string[];
+  timeframe?: string;
+}
+
+const DOMAIN_PROFILES: Record<string, DomainProfileBase> = {
   equity_research: {
     domain: "equity_research",
     domainLabel: "Equity Research",
@@ -37,9 +55,13 @@ const DOMAIN_PROFILES = {
  * Classifies the user query into a domain and returns the appropriate profile.
  * For V1, we only support equity_research but the architecture supports expansion.
  */
-export async function classifyDomain(query, send, config = {}) {
-  const params = {
-    ...(config.classifierModel && { model: config.classifierModel }),
+export async function classifyDomain(
+  query: string,
+  send: SendFn | undefined,
+  config: Partial<ReasoningConfig> = {},
+): Promise<AgentResult<DomainProfile>> {
+  const params: CreateMessageParams = {
+    model: config.classifierModel || ANTHROPIC_MODEL,
     system: `You are a query classifier for DoublyAI, an explainable research platform.
 Given a user query, determine which research domain it belongs to.
 
@@ -57,7 +79,7 @@ Respond with JSON only:
 
 If the query doesn't match any supported domain, still use "equity_research" as the closest match for V1.
 Extract the stock ticker if mentioned or inferable. Extract the company name.`,
-    messages: [{ role: "user", content: `<user_query>\n${query}\n</user_query>` }],
+    messages: [{ role: "user" as const, content: `<user_query>\n${query}\n</user_query>` }],
   };
 
   // Emit pre-call trace so frontend can show request details while LLM is working
@@ -80,25 +102,26 @@ Extract the stock ticker if mentioned or inferable. Extract the company name.`,
   const { response, trace } = await tracedCreate(params);
 
   try {
-    const text = response.content?.[0]?.text;
+    const firstBlock = response.content?.[0];
+    const text = firstBlock && "text" in firstBlock ? (firstBlock as { text: string }).text : undefined;
     if (!text) throw new Error("Empty classifier response");
-    const json = JSON.parse(text.replace(/```json\n?|\n?```/g, "").trim());
-    const result = {
+    const json: ClassifierResponse = JSON.parse(text.replace(/```json\n?|\n?```/g, "").trim());
+    const result: DomainProfile = {
       ...DOMAIN_PROFILES.equity_research,
       ticker: json.ticker || "N/A",
       companyName: json.companyName || query,
       focusAreas: json.focusAreas || [],
       timeframe: json.timeframe || "current",
     };
-    return { result, trace: { ...trace, parsedOutput: json } };
+    return { result, trace: { ...trace, parsedOutput: json as unknown as Record<string, unknown> } };
   } catch {
-    const result = {
+    const result: DomainProfile = {
       ...DOMAIN_PROFILES.equity_research,
       ticker: "N/A",
       companyName: query,
       focusAreas: [],
       timeframe: "current",
     };
-    return { result, trace: { ...trace, parsedOutput: null, parseError: "Fallback used" } };
+    return { result, trace: { ...trace, parsedOutput: undefined, parseError: "Fallback used" } };
   }
 }

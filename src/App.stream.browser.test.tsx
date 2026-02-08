@@ -1,9 +1,18 @@
 import { page } from "vitest/browser";
 import { render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import App from "./App.jsx";
+import App from "./App";
 
-function createChunkedSseResponse(chunks) {
+interface ChunkedSseResponse {
+  ok: boolean;
+  body: {
+    getReader(): {
+      read(): Promise<{ done: boolean; value: Uint8Array | undefined }>;
+    };
+  };
+}
+
+function createChunkedSseResponse(chunks: string[]): ChunkedSseResponse {
   const encoder = new TextEncoder();
   let index = 0;
 
@@ -12,7 +21,7 @@ function createChunkedSseResponse(chunks) {
     body: {
       getReader() {
         return {
-          async read() {
+          async read(): Promise<{ done: boolean; value: Uint8Array | undefined }> {
             if (index < chunks.length) {
               const value = encoder.encode(chunks[index]);
               index += 1;
@@ -26,13 +35,29 @@ function createChunkedSseResponse(chunks) {
   };
 }
 
+interface ReportMeta {
+  title: string;
+  subtitle: string;
+  date: string;
+  ticker: string;
+  exchange: string;
+  sector: string;
+  keyStats: unknown[];
+}
+
+interface Report {
+  meta: ReportMeta;
+  sections: unknown[];
+  findings: unknown[];
+}
+
 describe("App browser streaming regression", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
   it("renders report when SSE event and data arrive in separate chunks", async () => {
-    const report = {
+    const report: Report = {
       meta: {
         title: "NVIDIA (NVDA)",
         subtitle: "Equity Research",

@@ -1,3 +1,5 @@
+import type { ReasoningConfig } from "../shared/types";
+
 /**
  * Reasoning level presets that control every tunable parameter in the pipeline.
  *
@@ -7,7 +9,7 @@
  * X-Heavy: Maximum depth with opus
  */
 
-export const REASONING_LEVELS = {
+export const REASONING_LEVELS: Record<string, ReasoningConfig> = {
   "x-light": {
     label: "X-Light",
     description: "Fastest — minimal output for testing",
@@ -103,6 +105,6 @@ export const REASONING_LEVELS = {
 
 export const DEFAULT_REASONING_LEVEL = "heavy";
 
-export function getReasoningConfig(level) {
+export function getReasoningConfig(level: string): ReasoningConfig {
   return REASONING_LEVELS[level] || REASONING_LEVELS[DEFAULT_REASONING_LEVEL];
 }

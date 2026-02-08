@@ -1,23 +1,36 @@
 import { useState } from "react";
 
-const EXAMPLES = [
+interface Props {
+  onSubmit: (query: string) => void;
+  disabled: boolean;
+  reasoningLevel: string;
+  onReasoningLevelChange: (level: string) => void;
+}
+
+interface ReasoningLevelOption {
+  value: string;
+  label: string;
+  description: string;
+}
+
+const EXAMPLES: string[] = [
   "Analyze NVIDIA (NVDA)",
   "Deep dive on Tesla's competitive position",
   "Palantir equity research report",
   "Apple financial analysis and outlook",
 ];
 
-const REASONING_LEVELS = [
+const REASONING_LEVELS: ReasoningLevelOption[] = [
   { value: "x-light", label: "X-Light", description: "Fastest — for testing" },
   { value: "light", label: "Light", description: "Faster — reduced scope" },
   { value: "heavy", label: "Heavy", description: "Full quality" },
   { value: "x-heavy", label: "X-Heavy", description: "Maximum depth" },
 ];
 
-export default function QueryInput({ onSubmit, disabled, reasoningLevel, onReasoningLevelChange }) {
-  const [query, setQuery] = useState("");
+export default function QueryInput({ onSubmit, disabled, reasoningLevel, onReasoningLevelChange }: Props) {
+  const [query, setQuery] = useState<string>("");
 
-  const handleSubmit = (e) => {
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>): void => {
     e.preventDefault();
     if (query.trim().length >= 3 && !disabled) {
       onSubmit(query.trim());
@@ -41,7 +54,7 @@ export default function QueryInput({ onSubmit, disabled, reasoningLevel, onReaso
           <input
             type="text"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
             placeholder="Enter a company or research topic..."
             disabled={disabled}
             style={{
@@ -97,7 +110,7 @@ export default function QueryInput({ onSubmit, disabled, reasoningLevel, onReaso
         >
           Reasoning
         </span>
-        {REASONING_LEVELS.map((level) => {
+        {REASONING_LEVELS.map((level: ReasoningLevelOption) => {
           const isActive = reasoningLevel === level.value;
           return (
             <button
@@ -117,16 +130,16 @@ export default function QueryInput({ onSubmit, disabled, reasoningLevel, onReaso
                 transition: "all 0.15s",
                 opacity: disabled ? 0.5 : 1,
               }}
-              onMouseEnter={(e) => {
+              onMouseEnter={(e: React.MouseEvent<HTMLButtonElement>) => {
                 if (!isActive && !disabled) {
-                  e.target.style.borderColor = "#1a1a2e";
-                  e.target.style.color = "#1a1a2e";
+                  e.currentTarget.style.borderColor = "#1a1a2e";
+                  e.currentTarget.style.color = "#1a1a2e";
                 }
               }}
-              onMouseLeave={(e) => {
+              onMouseLeave={(e: React.MouseEvent<HTMLButtonElement>) => {
                 if (!isActive && !disabled) {
-                  e.target.style.borderColor = "#e2e4ea";
-                  e.target.style.color = "#555770";
+                  e.currentTarget.style.borderColor = "#e2e4ea";
+                  e.currentTarget.style.color = "#555770";
                 }
               }}
             >
@@ -147,7 +160,7 @@ export default function QueryInput({ onSubmit, disabled, reasoningLevel, onReaso
             justifyContent: "center",
           }}
         >
-          {EXAMPLES.map((ex) => (
+          {EXAMPLES.map((ex: string) => (
             <button
               key={ex}
               onClick={() => {
@@ -165,13 +178,13 @@ export default function QueryInput({ onSubmit, disabled, reasoningLevel, onReaso
                 cursor: "pointer",
                 transition: "all 0.15s",
               }}
-              onMouseEnter={(e) => {
-                e.target.style.borderColor = "#1a1a2e";
-                e.target.style.color = "#1a1a2e";
+              onMouseEnter={(e: React.MouseEvent<HTMLButtonElement>) => {
+                e.currentTarget.style.borderColor = "#1a1a2e";
+                e.currentTarget.style.color = "#1a1a2e";
               }}
-              onMouseLeave={(e) => {
-                e.target.style.borderColor = "#e2e4ea";
-                e.target.style.color = "#555770";
+              onMouseLeave={(e: React.MouseEvent<HTMLButtonElement>) => {
+                e.currentTarget.style.borderColor = "#e2e4ea";
+                e.currentTarget.style.color = "#555770";
               }}
             >
               {ex}

@@ -1,4 +1,13 @@
-import { tracedCreate } from "../anthropic-client.js";
+import { tracedCreate, type CreateMessageParams } from "../anthropic-client";
+import type {
+  DomainProfile,
+  EvidenceItem,
+  Report,
+  ReasoningConfig,
+  SendFn,
+  AgentResult,
+  PipelineError,
+} from "../../shared/types";
 
 /**
  * Synthesis Agent — transforms raw evidence into a structured research report.
@@ -8,17 +17,23 @@ import { tracedCreate } from "../anthropic-client.js";
  *   - Sections with content flow (interleaved findings and connecting text)
  *   - Findings with initial explanations and supporting evidence
  */
-export async function synthesize(query, domainProfile, evidence, send, config = {}) {
+export async function synthesize(
+  query: string,
+  domainProfile: DomainProfile,
+  evidence: EvidenceItem[],
+  send: SendFn | undefined,
+  config: Partial<ReasoningConfig> = {}
+): Promise<AgentResult<Report>> {
   const { ticker, companyName } = domainProfile;
 
-  const totalFindings = config.totalFindings || "25-35";
-  const findingsPerSection = config.findingsPerSection || "3-5";
-  const supportingEvidenceMin = config.supportingEvidenceMin || 3;
-  const explanationLength = config.explanationLength || "2-4 sentences";
-  const keyStatsCount = config.keyStatsCount || 6;
+  const totalFindings: string = config.totalFindings || "25-35";
+  const findingsPerSection: string = config.findingsPerSection || "3-5";
+  const supportingEvidenceMin: number = config.supportingEvidenceMin || 3;
+  const explanationLength: string = config.explanationLength || "2-4 sentences";
+  const keyStatsCount: number = config.keyStatsCount || 6;
 
   // Build keyStats example dynamically based on count
-  const keyStatsBase = [
+  const keyStatsBase: string[] = [
     '{ "label": "Price Target", "value": "$XXX" }',
     '{ "label": "Current Price", "value": "$XXX.XX" }',
     '{ "label": "Upside", "value": "~XX%" }',
@@ -28,10 +43,10 @@ export async function synthesize(query, domainProfile, evidence, send, config = 
     '{ "label": "Revenue Growth", "value": "XX%" }',
     '{ "label": "Gross Margin", "value": "XX%" }',
   ];
-  const keyStatsExample = keyStatsBase.slice(0, keyStatsCount).join(",\n      ");
+  const keyStatsExample: string = keyStatsBase.slice(0, keyStatsCount).join(",\n      ");
 
   // Derive max finding ID from total findings range
-  const maxFinding = parseInt(totalFindings.split("-").pop(), 10) || 30;
+  const maxFinding: number = parseInt(totalFindings.split("-").pop()!, 10) || 30;
 
   const params = {
     ...(config.synthesizerModel && { model: config.synthesizerModel }),
@@ -132,7 +147,7 @@ RULES FOR META:
 Respond with JSON only. No markdown fences. No commentary.`,
     messages: [
       {
-        role: "user",
+        role: "user" as const,
         content: `Here is the evidence gathered for ${companyName} (${ticker}). Synthesize this into a structured equity research report:\n\n${JSON.stringify(evidence, null, 2)}`,
       },
     ],
@@ -155,13 +170,15 @@ Respond with JSON only. No markdown fences. No commentary.`,
     });
   }
 
-  const { response, trace } = await tracedCreate(params);
+  const { response, trace } = await tracedCreate(params as CreateMessageParams);
 
   try {
-    const text = response.content?.[0]?.text;
+    const firstBlock = response.content?.[0];
+    const text: string | undefined =
+      firstBlock && firstBlock.type === "text" ? firstBlock.text : undefined;
     if (!text) throw new Error("Empty synthesizer response");
-    const cleaned = text.replace(/```json\n?|\n?```/g, "").trim();
-    const result = JSON.parse(cleaned);
+    const cleaned: string = text.replace(/```json\n?|\n?```/g, "").trim();
+    const result: Report = JSON.parse(cleaned);
     return {
       result,
       trace: {
@@ -174,18 +191,21 @@ Respond with JSON only. No markdown fences. No commentary.`,
       },
     };
   } catch (e) {
-    console.error("Synthesis agent parse error:", e.message);
-    const rawText = response.content?.[0]?.text || "";
-    const stopReason = response.stop_reason;
+    const err = e as Error;
+    console.error("Synthesis agent parse error:", err.message);
+    const rawFirstBlock = response.content?.[0];
+    const rawText: string =
+      rawFirstBlock && rawFirstBlock.type === "text" ? rawFirstBlock.text : "";
+    const stopReason: string | null = response.stop_reason;
 
     // If the response was truncated (max_tokens), try repair first since
     // balanced-brace extraction would only find incomplete sub-objects.
     if (stopReason === "max_tokens" && rawText.length > 0) {
       console.warn("Synthesis agent response was truncated at max_tokens, attempting repair");
-      const repaired = repairTruncatedJson(rawText.replace(/```json\n?|\n?```/g, "").trim());
+      const repaired: string | null = repairTruncatedJson(rawText.replace(/```json\n?|\n?```/g, "").trim());
       if (repaired) {
         try {
-          const result = JSON.parse(repaired);
+          const result: Report = JSON.parse(repaired);
           return {
             result,
             trace: {
@@ -195,17 +215,17 @@ Respond with JSON only. No markdown fences. No commentary.`,
             },
           };
         } catch (repairErr) {
-          console.error("Synthesis agent truncation repair failed:", repairErr.message);
+          console.error("Synthesis agent truncation repair failed:", (repairErr as Error).message);
         }
       }
     }
 
     // Try balanced-brace extraction to find a valid JSON object
     // (for cases where AI wrapped valid JSON in commentary text)
-    const extracted = extractJsonObject(rawText);
+    const extracted: string | null = extractJsonObject(rawText);
     if (extracted) {
       try {
-        const result = JSON.parse(extracted);
+        const result: Report = JSON.parse(extracted);
         return {
           result,
           trace: {
@@ -215,11 +235,11 @@ Respond with JSON only. No markdown fences. No commentary.`,
           },
         };
       } catch (parseErr) {
-        console.error("Synthesis agent brace-match fallback parse error:", parseErr.message);
+        console.error("Synthesis agent brace-match fallback parse error:", (parseErr as Error).message);
       }
     }
 
-    const error = new Error("Synthesis agent failed to produce valid report");
+    const error = new Error("Synthesis agent failed to produce valid report") as PipelineError;
     error.agentTrace = trace;
     error.rawOutput = rawText;
     throw error;
@@ -230,14 +250,14 @@ Respond with JSON only. No markdown fences. No commentary.`,
  * Extract a JSON object from text with surrounding commentary by finding
  * balanced brace pairs. Avoids the greedy regex pitfall.
  */
-function extractJsonObject(text) {
+function extractJsonObject(text: string): string | null {
   for (let i = 0; i < text.length; i++) {
     if (text[i] !== "{") continue;
     let depth = 0;
     let inString = false;
     let escape = false;
     for (let j = i; j < text.length; j++) {
-      const ch = text[j];
+      const ch: string = text[j];
       if (escape) { escape = false; continue; }
       if (ch === "\\" && inString) { escape = true; continue; }
       if (ch === '"') { inString = !inString; continue; }
@@ -246,7 +266,7 @@ function extractJsonObject(text) {
       if (ch === "}") {
         depth--;
         if (depth === 0) {
-          const candidate = text.slice(i, j + 1);
+          const candidate: string = text.slice(i, j + 1);
           try {
             JSON.parse(candidate);
             return candidate;
@@ -268,10 +288,10 @@ function extractJsonObject(text) {
  * trim from the end to find a clean cut point (not inside a string or
  * key-value pair), and close all remaining open structures.
  */
-function repairTruncatedJson(text) {
+function repairTruncatedJson(text: string): string | null {
   // Find a clean cut point by trimming back to the last complete value
   // Try several strategies, from least to most aggressive:
-  const candidates = [
+  const candidates: string[] = [
     text,
     // Strip trailing incomplete string (unmatched quote at end)
     text.replace(/,?\s*"[^"]*$/, ""),
@@ -284,13 +304,13 @@ function repairTruncatedJson(text) {
   for (const candidate of candidates) {
     if (!candidate || candidate.length < 2) continue;
 
-    const closers = [];
+    const closers: string[] = [];
     let inString = false;
     let escape = false;
     let valid = true;
 
     for (let i = 0; i < candidate.length; i++) {
-      const ch = candidate[i];
+      const ch: string = candidate[i];
       if (escape) { escape = false; continue; }
       if (ch === "\\" && inString) { escape = true; continue; }
       if (ch === '"') { inString = !inString; continue; }
@@ -304,7 +324,7 @@ function repairTruncatedJson(text) {
     if (inString) continue;
     if (closers.length === 0) continue;
 
-    const repaired = candidate + closers.reverse().join("");
+    const repaired: string = candidate + closers.reverse().join("");
     try {
       JSON.parse(repaired);
       return repaired;

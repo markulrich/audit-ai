@@ -1,23 +1,32 @@
 import { useState, useRef, useEffect } from "react";
-import QueryInput from "./components/QueryInput.jsx";
-import ProgressStream from "./components/ProgressStream.jsx";
-import Report from "./components/Report.jsx";
+import type { Report, ProgressEvent, TraceEvent, ErrorInfo, ErrorDetail } from "../shared/types";
+import QueryInput from "./components/QueryInput";
+import ProgressStream from "./components/ProgressStream";
+import Report_ from "./components/Report";
 
-function isReportPayload(value) {
+function isReportPayload(value: unknown): value is Report {
   return (
-    value &&
+    value != null &&
     typeof value === "object" &&
-    value.meta &&
+    "meta" in value &&
+    value.meta != null &&
     typeof value.meta === "object" &&
+    "sections" in value &&
     Array.isArray(value.sections) &&
+    "findings" in value &&
     Array.isArray(value.findings)
   );
 }
 
-function parseSseBlock(block) {
+interface SseBlock {
+  eventType: string;
+  data: string;
+}
+
+function parseSseBlock(block: string): SseBlock | null {
   const lines = block.split(/\r?\n/);
   let eventType = "message";
-  const dataLines = [];
+  const dataLines: string[] = [];
 
   for (const line of lines) {
     if (!line || line.startsWith(":")) continue;
@@ -45,14 +54,16 @@ function getPublishedSlug() {
 }
 
 export default function App() {
-  const [state, setState] = useState(() => getPublishedSlug() ? "loading-published" : "idle"); // idle | loading | loading-published | done | error
-  const [progress, setProgress] = useState([]);
-  const [report, setReport] = useState(null);
-  const [error, setError] = useState(null);
-  const [traceData, setTraceData] = useState([]);
-  const [reasoningLevel, setReasoningLevel] = useState("heavy");
-  const [publishedSlug, setPublishedSlug] = useState(getPublishedSlug);
-  const abortRef = useRef(null);
+  const [state, setState] = useState<"idle" | "loading" | "loading-published" | "done" | "error">(
+    () => getPublishedSlug() ? "loading-published" : "idle"
+  );
+  const [progress, setProgress] = useState<ProgressEvent[]>([]);
+  const [report, setReport] = useState<Report | null>(null);
+  const [error, setError] = useState<ErrorInfo | null>(null);
+  const [traceData, setTraceData] = useState<TraceEvent[]>([]);
+  const [reasoningLevel, setReasoningLevel] = useState<string>("heavy");
+  const [publishedSlug, setPublishedSlug] = useState<string | null>(getPublishedSlug);
+  const abortRef = useRef<AbortController | null>(null);
 
   // Load published report on mount if URL matches /reports/:slug
   useEffect(() => {
@@ -68,18 +79,18 @@ export default function App() {
         if (!res.ok) throw new Error(res.status === 404 ? "Report not found" : `Error ${res.status}`);
         return res.json();
       })
-      .then((data) => {
+      .then((data: { report: Report }) => {
         setReport(data.report);
         setPublishedSlug(slug);
         setState("done");
       })
-      .catch((err) => {
+      .catch((err: Error) => {
         setError({ message: err.message || "Failed to load report", detail: null });
         setState("error");
       });
   }, []);
 
-  const handleGenerate = async (query) => {
+  const handleGenerate = async (query: string): Promise<void> => {
     // Abort any in-flight request
     if (abortRef.current) abortRef.current.abort();
     const controller = new AbortController();
@@ -117,22 +128,24 @@ export default function App() {
       const decoder = new TextDecoder();
       let buffer = "";
 
-      const handleEventPayload = (eventType, payload) => {
+      const handleEventPayload = (eventType: string, payload: unknown): void => {
         if (eventType === "progress") {
-          setProgress((prev) => [...prev, payload]);
+          setProgress((prev) => [...prev, payload as ProgressEvent]);
           return;
         }
 
         if (eventType === "trace") {
-          setTraceData((prev) => [...prev, payload]);
+          setTraceData((prev) => [...prev, payload as TraceEvent]);
           return;
         }
 
-        if (eventType === "error" || (eventType === "message" && typeof payload?.error === "string")) {
+        const data = payload as Record<string, unknown> | null | undefined;
+
+        if (eventType === "error" || (eventType === "message" && typeof data?.error === "string")) {
           receivedError = true;
-          const errorInfo = {
-            message: payload?.message || payload?.error || "Report generation failed.",
-            detail: payload?.detail || null,
+          const errorInfo: ErrorInfo = {
+            message: (data?.message as string) || (data?.error as string) || "Report generation failed.",
+            detail: (data?.detail as ErrorDetail) || null,
           };
           setError(errorInfo);
           setState("error");
@@ -141,24 +154,24 @@ export default function App() {
 
         if (eventType === "report" || (eventType === "message" && isReportPayload(payload))) {
           receivedReport = true;
-          setReport(payload);
+          setReport(payload as Report);
           setState("done");
         }
       };
 
-      const handleSerializedData = (eventType, serialized) => {
+      const handleSerializedData = (eventType: string, serialized: string): void => {
         try {
-          const payload = JSON.parse(serialized);
+          const payload: unknown = JSON.parse(serialized);
           handleEventPayload(eventType, payload);
         } catch {
           // skip malformed JSON
         }
       };
 
-      const flushBuffer = (force = false) => {
+      const flushBuffer = (force: boolean = false): void => {
         const separator = /\r?\n\r?\n/g;
         let start = 0;
-        let match;
+        let match: RegExpExecArray | null;
 
         while ((match = separator.exec(buffer)) !== null) {
           const block = buffer.slice(start, match.index);
@@ -185,7 +198,7 @@ export default function App() {
       };
 
       while (true) {
-        const { done, value } = await reader.read();
+        const { done, value }: ReadableStreamReadResult<Uint8Array> = await reader.read();
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
@@ -199,13 +212,15 @@ export default function App() {
         setState("error");
         setError({ message: "Pipeline completed without producing a report.", detail: null });
       }
-    } catch (err) {
-      if (err.name === "AbortError") return; // User cancelled — do nothing
+    } catch (rawErr: unknown) {
+      if (rawErr instanceof Error && rawErr.name === "AbortError") return; // User cancelled — do nothing
+
+      const err = rawErr instanceof Error ? rawErr : new Error(String(rawErr));
 
       // Browser gives unhelpful messages like "Load failed" or "Failed to fetch"
       // when the connection drops (e.g., server restart, network issue).
       const isNetworkError =
-        err instanceof TypeError &&
+        rawErr instanceof TypeError &&
         /load failed|failed to fetch|network/i.test(err.message);
 
       const message = isNetworkError
@@ -226,7 +241,7 @@ export default function App() {
     }
   };
 
-  const handleReset = () => {
+  const handleReset = (): void => {
     // Abort any in-flight request
     if (abortRef.current) {
       abortRef.current.abort();
@@ -245,7 +260,7 @@ export default function App() {
   };
 
   if (state === "done" && report) {
-    return <Report data={report} traceData={traceData} onBack={handleReset} publishedSlug={publishedSlug} />;
+    return <Report_ data={report} traceData={traceData} onBack={handleReset} publishedSlug={publishedSlug} />;
   }
 
   if (state === "loading-published") {
