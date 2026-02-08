@@ -11,7 +11,7 @@ DoublyAI is an **explainable research platform** that generates professional-gra
 
 - **Frontend:** React 19 + Vite 6 (NOT Next.js — explicit founder preference)
 - **Backend:** Express with SSE streaming
-- **AI:** Anthropic Claude API (claude-sonnet-4-5-20250514) via `@anthropic-ai/sdk`
+- **AI:** Anthropic Claude API (configurable via `ANTHROPIC_MODEL`, default `claude-3-7-sonnet-latest`) via `@anthropic-ai/sdk`
 - **Deployment:** fly.io with Docker (node:22-slim)
 
 ## Architecture: Multi-Agent Pipeline

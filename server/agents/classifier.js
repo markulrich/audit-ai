@@ -1,4 +1,4 @@
-import { client } from "../anthropic-client.js";
+import { createMessage } from "../anthropic-client.js";
 
 const DOMAIN_PROFILES = {
   equity_research: {
@@ -38,8 +38,7 @@ const DOMAIN_PROFILES = {
  * For V1, we only support equity_research but the architecture supports expansion.
  */
 export async function classifyDomain(query) {
-  const response = await client.messages.create({
-    model: "claude-sonnet-4-5-20250514",
+  const response = await createMessage({
     max_tokens: 512,
     system: `You are a query classifier for DoublyAI, an explainable research platform.
 Given a user query, determine which research domain it belongs to.

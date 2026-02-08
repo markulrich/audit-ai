@@ -1,4 +1,4 @@
-import { client } from "../anthropic-client.js";
+import { createMessage } from "../anthropic-client.js";
 
 /**
  * Removes finding references from section content arrays when the finding
@@ -44,8 +44,7 @@ function cleanOrphanedRefs(report) {
 export async function verify(query, domainProfile, draft) {
   const { ticker, companyName } = domainProfile;
 
-  const response = await client.messages.create({
-    model: "claude-sonnet-4-5-20250514",
+  const response = await createMessage({
     max_tokens: 16384,
     system: `You are an adversarial fact-checker and research quality auditor. Your job is to find problems with every finding in a draft equity research report.
 

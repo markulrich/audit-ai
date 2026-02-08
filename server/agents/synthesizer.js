@@ -1,4 +1,4 @@
-import { client } from "../anthropic-client.js";
+import { createMessage } from "../anthropic-client.js";
 
 /**
  * Synthesis Agent — transforms raw evidence into a structured research report.
@@ -11,8 +11,7 @@ import { client } from "../anthropic-client.js";
 export async function synthesize(query, domainProfile, evidence) {
   const { ticker, companyName } = domainProfile;
 
-  const response = await client.messages.create({
-    model: "claude-sonnet-4-5-20250514",
+  const response = await createMessage({
     max_tokens: 16384,
     system: `You are a senior equity research analyst at a top-tier investment bank (Morgan Stanley, JPMorgan, Goldman Sachs caliber).
 

@@ -15,12 +15,15 @@ export const client = new Anthropic({
   maxRetries: 2,
 });
 
+// For testing, use haiku to save $, but in prod use sonnet or opus.
 export const ANTHROPIC_MODEL =
-  process.env.ANTHROPIC_MODEL || "claude-3-7-sonnet-latest";
+  process.env.ANTHROPIC_MODEL || "claude-haiku-4-5";
 
 const MODEL_FALLBACKS = [
   ANTHROPIC_MODEL,
-  "claude-3-5-sonnet-latest",
+  "claude-haiku-4-5",
+  "claude-opus-4-6",
+  "claude-sonnet-4-5"
 ];
 
 function isModelNotFound(err) {
