@@ -6,21 +6,23 @@ console.log("[startup] NODE_ENV:", process.env.NODE_ENV);
 console.log("[startup] PORT:", process.env.PORT);
 
 if (!process.env.ANTHROPIC_API_KEY) {
-  console.error(
-    "FATAL: ANTHROPIC_API_KEY environment variable is not set.\n" +
+  console.warn(
+    "WARNING: ANTHROPIC_API_KEY is not set. " +
+    "The app will serve the frontend but API calls will fail.\n" +
     "Copy .env.example to .env and add your key:\n" +
     "  cp .env.example .env"
   );
-  process.exit(1);
 }
 
 console.log("[startup] Creating Anthropic client...");
-export const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-  timeout: 120_000,
-  maxRetries: 2,
-});
-console.log("[startup] Anthropic client created successfully");
+export const client = process.env.ANTHROPIC_API_KEY
+  ? new Anthropic({
+      apiKey: process.env.ANTHROPIC_API_KEY,
+      timeout: 120_000,
+      maxRetries: 2,
+    })
+  : null;
+console.log("[startup] Anthropic client:", client ? "created" : "skipped (no API key)");
 
 // For testing, use haiku to save $, but in prod use sonnet or opus.
 export const ANTHROPIC_MODEL =
@@ -40,6 +42,9 @@ function isModelNotFound(err) {
 }
 
 export async function createMessage(params) {
+  if (!client) {
+    throw Object.assign(new Error("ANTHROPIC_API_KEY is not configured."), { status: 401 });
+  }
   const requestedModel = params.model;
   const candidateModels = [
     ...new Set([requestedModel, ...MODEL_FALLBACKS].filter(Boolean)),
