@@ -174,7 +174,8 @@ Return the complete report JSON. No markdown fences. No commentary.`,
     const cleaned = text.replace(/```json\n?|\n?```/g, "").trim();
     const report = JSON.parse(cleaned);
 
-    // Ensure overallCertainty is computed
+    // Ensure meta and overallCertainty exist
+    if (!report.meta) report.meta = {};
     if (!report.meta.overallCertainty && report.findings?.length > 0) {
       report.meta.overallCertainty = Math.round(
         report.findings.reduce((s, f) => s + (f.certainty || 50), 0) /
@@ -209,11 +210,44 @@ Return the complete report JSON. No markdown fences. No commentary.`,
   } catch (e) {
     console.error("Verification agent parse error:", e.message);
     const rawText = response.content?.[0]?.text || "";
-    const match = rawText.match(/\{[\s\S]*\}/);
-    if (match) {
+    // Try to extract a valid JSON object from the response by finding
+    // balanced brace pairs and attempting to parse each one. This avoids
+    // the greedy regex pitfall of matching across unrelated braces.
+    let extracted = null;
+    for (let i = 0; i < rawText.length; i++) {
+      if (rawText[i] !== "{") continue;
+      // Find the matching closing brace using depth counting
+      let depth = 0;
+      let inString = false;
+      let escape = false;
+      for (let j = i; j < rawText.length; j++) {
+        const ch = rawText[j];
+        if (escape) { escape = false; continue; }
+        if (ch === "\\" && inString) { escape = true; continue; }
+        if (ch === '"') { inString = !inString; continue; }
+        if (inString) continue;
+        if (ch === "{") depth++;
+        if (ch === "}") {
+          depth--;
+          if (depth === 0) {
+            try {
+              const candidate = JSON.parse(rawText.slice(i, j + 1));
+              if (!extracted || candidate.findings) extracted = candidate;
+              if (candidate.findings) break;
+            } catch {
+              // Not valid JSON, try the next '{'
+            }
+            break;
+          }
+        }
+      }
+      if (extracted?.findings) break;
+    }
+    if (extracted) {
       try {
-        const report = JSON.parse(match[0]);
-        if (!report.meta?.overallCertainty && report.findings?.length > 0) {
+        const report = extracted;
+        if (!report.meta) report.meta = {};
+        if (!report.meta.overallCertainty && report.findings?.length > 0) {
           report.meta.overallCertainty = Math.round(
             report.findings.reduce((s, f) => s + (f.certainty || 50), 0) /
               report.findings.length
@@ -238,6 +272,7 @@ Return the complete report JSON. No markdown fences. No commentary.`,
         contraryEvidence: f.explanation?.contraryEvidence || [],
       },
     }));
+    if (!draft.meta) draft.meta = {};
     draft.meta.overallCertainty =
       draft.findings.length > 0
         ? Math.round(
