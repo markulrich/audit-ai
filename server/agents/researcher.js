@@ -1,4 +1,4 @@
-import { createMessage } from "../anthropic-client.js";
+import { tracedCreate } from "../anthropic-client.js";
 
 /**
  * Research Agent — gathers structured evidence about a topic.
@@ -8,10 +8,10 @@ import { createMessage } from "../anthropic-client.js";
  *
  * V1: Uses Claude's training knowledge. Future: add Brave/SerpAPI for live search.
  */
-export async function research(query, domainProfile) {
+export async function research(query, domainProfile, send) {
   const { ticker, companyName, focusAreas } = domainProfile;
 
-  const response = await createMessage({
+  const params = {
     max_tokens: 12288,
     system: `You are a senior financial research analyst gathering evidence for an equity research report.
 
@@ -64,19 +64,41 @@ Respond with a JSON array of evidence items. JSON only, no markdown.`,
         content: `<user_query>\nGather comprehensive evidence for an equity research report on ${companyName} (${ticker}). Be thorough — I need at least 40 data points covering financials, products, competition, risks, and analyst sentiment.\n</user_query>`,
       },
     ],
-  });
+  };
+
+  // Emit pre-call trace so frontend can show request details while LLM is working
+  if (send) {
+    send("trace", {
+      stage: "researcher",
+      agent: "Researcher",
+      status: "pending",
+      trace: {
+        request: {
+          model: params.model || "(default)",
+          max_tokens: params.max_tokens,
+          system: params.system,
+          messages: params.messages,
+        },
+      },
+    });
+  }
+
+  const { response, trace } = await tracedCreate(params);
 
   try {
     const text = response.content?.[0]?.text;
     if (!text) throw new Error("Empty researcher response");
     const cleaned = text.replace(/```json\n?|\n?```/g, "").trim();
-    return JSON.parse(cleaned);
+    const result = JSON.parse(cleaned);
+    return { result, trace: { ...trace, parsedOutput: { evidenceCount: result.length } } };
   } catch (e) {
     console.error("Research agent parse error:", e.message);
-    // Try to extract JSON array from response
     const rawText = response.content?.[0]?.text || "";
     const match = rawText.match(/\[[\s\S]*\]/);
-    if (match) return JSON.parse(match[0]);
+    if (match) {
+      const result = JSON.parse(match[0]);
+      return { result, trace: { ...trace, parsedOutput: { evidenceCount: result.length }, parseWarning: "Extracted via regex fallback" } };
+    }
     throw new Error("Research agent failed to produce valid evidence");
   }
 }

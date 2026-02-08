@@ -59,3 +59,36 @@ export async function createMessage(params) {
 
   throw lastModelError || new Error("No available Anthropic model.");
 }
+
+/**
+ * Wraps createMessage to capture full trace data:
+ * request params, raw response, timing, and token usage.
+ *
+ * Returns { response, trace } where trace contains everything
+ * needed for debugging drill-down.
+ */
+export async function tracedCreate(params) {
+  const startTime = Date.now();
+  const response = await createMessage(params);
+  const durationMs = Date.now() - startTime;
+
+  const trace = {
+    request: {
+      model: params.model,
+      max_tokens: params.max_tokens,
+      system: params.system,
+      messages: params.messages,
+    },
+    response: {
+      raw: response.content?.[0]?.text || "",
+      stop_reason: response.stop_reason,
+      usage: response.usage || {},
+    },
+    timing: {
+      startTime: new Date(startTime).toISOString(),
+      durationMs,
+    },
+  };
+
+  return { response, trace };
+}

@@ -43,6 +43,7 @@ export default function App() {
   const [progress, setProgress] = useState([]);
   const [report, setReport] = useState(null);
   const [error, setError] = useState(null);
+  const [traceData, setTraceData] = useState([]);
   const abortRef = useRef(null);
 
   const handleGenerate = async (query) => {
@@ -55,6 +56,7 @@ export default function App() {
     setProgress([]);
     setReport(null);
     setError(null);
+    setTraceData([]);
 
     // Local flags to avoid stale closure over React state
     let receivedReport = false;
@@ -84,6 +86,11 @@ export default function App() {
       const handleEventPayload = (eventType, payload) => {
         if (eventType === "progress") {
           setProgress((prev) => [...prev, payload]);
+          return;
+        }
+
+        if (eventType === "trace") {
+          setTraceData((prev) => [...prev, payload]);
           return;
         }
 
@@ -171,10 +178,11 @@ export default function App() {
     setProgress([]);
     setReport(null);
     setError(null);
+    setTraceData([]);
   };
 
   if (state === "done" && report) {
-    return <Report data={report} onBack={handleReset} />;
+    return <Report data={report} traceData={traceData} onBack={handleReset} />;
   }
 
   return (
@@ -224,7 +232,7 @@ export default function App() {
       {/* Progress */}
       {state === "loading" && (
         <>
-          <ProgressStream steps={progress} />
+          <ProgressStream steps={progress} traceData={traceData} />
           <button
             onClick={handleReset}
             style={{
@@ -246,38 +254,44 @@ export default function App() {
 
       {/* Error */}
       {state === "error" && (
-        <div
-          style={{
-            marginTop: 24,
-            padding: "16px 24px",
-            background: "#b91c1c0a",
-            border: "1px solid #b91c1c30",
-            borderRadius: 6,
-            maxWidth: 600,
-            width: "100%",
-          }}
-        >
-          <div style={{ fontSize: 13, fontWeight: 600, color: "#b91c1c", marginBottom: 4 }}>
-            Generation Failed
-          </div>
-          <div style={{ fontSize: 13, color: "#555770" }}>{error}</div>
-          <button
-            onClick={handleReset}
+        <>
+          {/* Show all intermediate progress/trace data accumulated before error */}
+          {progress.length > 0 && (
+            <ProgressStream steps={progress} traceData={traceData} />
+          )}
+          <div
             style={{
-              marginTop: 12,
-              padding: "6px 16px",
-              fontSize: 12,
-              fontWeight: 600,
-              border: "1px solid #e2e4ea",
-              borderRadius: 4,
-              background: "#fff",
-              cursor: "pointer",
-              color: "#1a1a2e",
+              marginTop: 24,
+              padding: "16px 24px",
+              background: "#b91c1c0a",
+              border: "1px solid #b91c1c30",
+              borderRadius: 6,
+              maxWidth: 560,
+              width: "100%",
             }}
           >
-            Try Again
-          </button>
-        </div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#b91c1c", marginBottom: 4 }}>
+              Generation Failed
+            </div>
+            <div style={{ fontSize: 13, color: "#555770" }}>{error}</div>
+            <button
+              onClick={handleReset}
+              style={{
+                marginTop: 12,
+                padding: "6px 16px",
+                fontSize: 12,
+                fontWeight: 600,
+                border: "1px solid #e2e4ea",
+                borderRadius: 4,
+                background: "#fff",
+                cursor: "pointer",
+                color: "#1a1a2e",
+              }}
+            >
+              Try Again
+            </button>
+          </div>
+        </>
       )}
     </div>
   );
