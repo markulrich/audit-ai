@@ -1,20 +1,12 @@
 import Anthropic from "@anthropic-ai/sdk";
 
-console.log("[startup] anthropic-client.js loading...");
-console.log("[startup] ANTHROPIC_API_KEY set:", !!process.env.ANTHROPIC_API_KEY);
-console.log("[startup] NODE_ENV:", process.env.NODE_ENV);
-console.log("[startup] PORT:", process.env.PORT);
-
 if (!process.env.ANTHROPIC_API_KEY) {
   console.warn(
     "WARNING: ANTHROPIC_API_KEY is not set. " +
-    "The app will serve the frontend but API calls will fail.\n" +
-    "Copy .env.example to .env and add your key:\n" +
-    "  cp .env.example .env"
+    "The app will serve the frontend but API calls will fail."
   );
 }
 
-console.log("[startup] Creating Anthropic client...");
 export const client = process.env.ANTHROPIC_API_KEY
   ? new Anthropic({
       apiKey: process.env.ANTHROPIC_API_KEY,
@@ -22,7 +14,6 @@ export const client = process.env.ANTHROPIC_API_KEY
       maxRetries: 2,
     })
   : null;
-console.log("[startup] Anthropic client:", client ? "created" : "skipped (no API key)");
 
 // For testing, use haiku to save $, but in prod use sonnet or opus.
 export const ANTHROPIC_MODEL =

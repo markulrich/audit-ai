@@ -7,31 +7,16 @@ process.on("unhandledRejection", (reason) => {
   process.exit(1);
 });
 
-console.log("[startup] index.js loading...");
-console.log("[startup] process.version:", process.version);
-console.log("[startup] process.platform:", process.platform);
-console.log("[startup] process.arch:", process.arch);
-console.log("[startup] cwd:", process.cwd());
-
 import express from "express";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { existsSync } from "fs";
 import { runPipeline } from "./pipeline.js";
 
-// Validate API key at startup (exits if missing)
 import "./anthropic-client.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const distPath = join(__dirname, "..", "dist");
-console.log("[startup] __dirname:", __dirname);
-console.log("[startup] dist path:", distPath);
-console.log("[startup] dist exists:", existsSync(distPath));
-console.log("[startup] dist/index.html exists:", existsSync(join(distPath, "index.html")));
-
 const app = express();
 const PORT = process.env.PORT || 3001;
-console.log("[startup] PORT:", PORT);
 
 const MAX_QUERY_LENGTH = 5000;
 
@@ -178,10 +163,9 @@ if (process.env.NODE_ENV === "production") {
   });
 }
 
-console.log("[startup] About to call app.listen on 0.0.0.0:" + PORT);
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`[startup] DoublyAI server running on http://0.0.0.0:${PORT}`);
+  console.log(`DoublyAI server running on http://0.0.0.0:${PORT}`);
 }).on("error", (err) => {
-  console.error("[startup] LISTEN ERROR:", err.message, err.code);
+  console.error("LISTEN ERROR:", err.message, err.code);
   process.exit(1);
 });
