@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import type { TraceData, TraceRequest, PipelineError } from "../shared/types";
 
 if (!process.env.ANTHROPIC_API_KEY) {
   console.warn(
@@ -7,7 +8,7 @@ if (!process.env.ANTHROPIC_API_KEY) {
   );
 }
 
-export const client = process.env.ANTHROPIC_API_KEY
+export const client: Anthropic | null = process.env.ANTHROPIC_API_KEY
   ? new Anthropic({
       apiKey: process.env.ANTHROPIC_API_KEY,
       timeout: 120_000,
@@ -16,10 +17,10 @@ export const client = process.env.ANTHROPIC_API_KEY
   : null;
 
 // For testing, use haiku to save $, but in prod use sonnet or opus.
-export const ANTHROPIC_MODEL =
+export const ANTHROPIC_MODEL: string =
   process.env.ANTHROPIC_MODEL || "claude-haiku-4-5";
 
-const MODEL_FALLBACKS = [
+const MODEL_FALLBACKS: string[] = [
   ANTHROPIC_MODEL,
   "claude-haiku-4-5",
   "claude-opus-4-6",
@@ -27,14 +28,14 @@ const MODEL_FALLBACKS = [
 ];
 
 // Max output tokens per model family. The API rejects requests that exceed these.
-const MODEL_MAX_OUTPUT_TOKENS = {
+const MODEL_MAX_OUTPUT_TOKENS: Record<string, number> = {
   "claude-haiku": 8192,
   "claude-sonnet": 16384,
   "claude-opus": 16384,
 };
 
 /** Return the max output tokens for a given model ID. */
-function getMaxOutputTokens(model) {
+function getMaxOutputTokens(model: string | undefined): number {
   if (!model) return 8192;
   for (const [prefix, max] of Object.entries(MODEL_MAX_OUTPUT_TOKENS)) {
     if (model.startsWith(prefix)) return max;
@@ -42,29 +43,38 @@ function getMaxOutputTokens(model) {
   return 8192; // safe default
 }
 
-function isModelNotFound(err) {
-  const status = err?.status;
-  const message = `${err?.message || ""} ${err?.error?.error?.message || ""}`.toLowerCase();
+function isModelNotFound(err: unknown): boolean {
+  const apiErr = err as {
+    status?: number;
+    message?: string;
+    error?: { error?: { message?: string } };
+  };
+  const status: number | undefined = apiErr?.status;
+  const message: string = `${apiErr?.message || ""} ${apiErr?.error?.error?.message || ""}`.toLowerCase();
   return status === 404 && message.includes("model");
 }
 
-export async function createMessage(params) {
+export type CreateMessageParams = Omit<Anthropic.MessageCreateParamsNonStreaming, "max_tokens"> & {
+  max_tokens?: number;
+};
+
+export async function createMessage(params: CreateMessageParams): Promise<Anthropic.Message> {
   if (!client) {
-    const err = new Error("ANTHROPIC_API_KEY is not configured.");
+    const err = new Error("ANTHROPIC_API_KEY is not configured.") as PipelineError;
     err.status = 401;
     err.keyMissing = true;
     throw err;
   }
-  const requestedModel = params.model;
-  const candidateModels = [
+  const requestedModel: string = params.model;
+  const candidateModels: string[] = [
     ...new Set([requestedModel, ...MODEL_FALLBACKS].filter(Boolean)),
   ];
 
-  let lastModelError = null;
+  let lastModelError: unknown = null;
   for (const model of candidateModels) {
     try {
       // Always use the model's maximum output tokens
-      const max_tokens = getMaxOutputTokens(model);
+      const max_tokens: number = getMaxOutputTokens(model);
       return await client.messages.create({ ...params, model, max_tokens });
     } catch (err) {
       if (isModelNotFound(err)) {
@@ -78,6 +88,11 @@ export async function createMessage(params) {
   throw lastModelError || new Error("No available Anthropic model.");
 }
 
+interface TracedResult {
+  response: Anthropic.Message;
+  trace: TraceData;
+}
+
 /**
  * Wraps createMessage to capture full trace data:
  * request params, raw response, timing, and token usage.
@@ -85,26 +100,29 @@ export async function createMessage(params) {
  * Returns { response, trace } where trace contains everything
  * needed for debugging drill-down.
  */
-export async function tracedCreate(params) {
-  const startTime = Date.now();
-  const response = await createMessage(params);
-  const durationMs = Date.now() - startTime;
+export async function tracedCreate(params: CreateMessageParams): Promise<TracedResult> {
+  const startTime: number = Date.now();
+  const response: Anthropic.Message = await createMessage(params);
+  const durationMs: number = Date.now() - startTime;
 
   // Resolve the actual max_tokens that was used (set by createMessage based on model)
-  const resolvedModel = response.model || params.model || ANTHROPIC_MODEL;
-  const resolvedMaxTokens = getMaxOutputTokens(resolvedModel);
+  const resolvedModel: string = response.model || params.model || ANTHROPIC_MODEL;
+  const resolvedMaxTokens: number = getMaxOutputTokens(resolvedModel);
 
-  const trace = {
+  const responseText: string =
+    response.content?.[0]?.type === "text" ? response.content[0].text : "";
+
+  const trace: TraceData = {
     request: {
       model: params.model,
       max_tokens: resolvedMaxTokens,
-      system: params.system,
-      messages: params.messages,
+      system: params.system as string | undefined,
+      messages: params.messages as TraceRequest["messages"],
     },
     response: {
-      raw: response.content?.[0]?.text || "",
-      stop_reason: response.stop_reason,
-      usage: response.usage || {},
+      raw: responseText,
+      stop_reason: response.stop_reason ?? undefined,
+      usage: response.usage,
     },
     timing: {
       startTime: new Date(startTime).toISOString(),

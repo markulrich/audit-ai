@@ -1,9 +1,18 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import App from "./App.jsx";
+import App from "./App";
 
-function createChunkedSseResponse(chunks) {
+interface ChunkedSseResponse {
+  ok: boolean;
+  body: {
+    getReader(): {
+      read(): Promise<{ done: boolean; value: Uint8Array | undefined }>;
+    };
+  };
+}
+
+function createChunkedSseResponse(chunks: string[]): ChunkedSseResponse {
   const encoder = new TextEncoder();
   let index = 0;
 
@@ -12,7 +21,7 @@ function createChunkedSseResponse(chunks) {
     body: {
       getReader() {
         return {
-          async read() {
+          async read(): Promise<{ done: boolean; value: Uint8Array | undefined }> {
             if (index < chunks.length) {
               const value = encoder.encode(chunks[index]);
               index += 1;
@@ -26,13 +35,29 @@ function createChunkedSseResponse(chunks) {
   };
 }
 
+interface ReportMeta {
+  title: string;
+  subtitle: string;
+  date: string;
+  ticker: string;
+  exchange: string;
+  sector: string;
+  keyStats: unknown[];
+}
+
+interface Report {
+  meta: ReportMeta;
+  sections: unknown[];
+  findings: unknown[];
+}
+
 describe("App SSE parsing", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
   it("renders a report when event and data are in the same chunk", async () => {
-    const report = {
+    const report: Report = {
       meta: {
         title: "NVIDIA (NVDA)",
         subtitle: "Equity Research",
@@ -66,7 +91,7 @@ describe("App SSE parsing", () => {
   });
 
   it("renders a report when event and data arrive in separate chunks", async () => {
-    const report = {
+    const report: Report = {
       meta: {
         title: "NVIDIA (NVDA)",
         subtitle: "Equity Research",
@@ -104,7 +129,7 @@ describe("App SSE parsing", () => {
   });
 
   it("renders a report when SSE data line is formatted as data:<json>", async () => {
-    const report = {
+    const report: Report = {
       meta: {
         title: "NVIDIA (NVDA)",
         subtitle: "Equity Research",
@@ -138,7 +163,7 @@ describe("App SSE parsing", () => {
   });
 
   it("renders a report when backend returns a plain JSON 200 body", async () => {
-    const report = {
+    const report: Report = {
       meta: {
         title: "NVIDIA (NVDA)",
         subtitle: "Equity Research",

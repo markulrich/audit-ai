@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "lib": ["ESNext"]
+  },
+  "include": [
+    "server",
+    "shared",
+    "vite.config.ts",
+    "vitest.server.config.ts",
+    "vitest.browser.config.ts"
+  ]
+}

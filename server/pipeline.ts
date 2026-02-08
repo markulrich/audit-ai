@@ -1,9 +1,20 @@
-import { classifyDomain } from "./agents/classifier.js";
-import { research } from "./agents/researcher.js";
-import { synthesize } from "./agents/synthesizer.js";
-import { verify } from "./agents/verifier.js";
-import { ANTHROPIC_MODEL } from "./anthropic-client.js";
-import { getReasoningConfig } from "./reasoning-levels.js";
+import { classifyDomain } from "./agents/classifier";
+import { research } from "./agents/researcher";
+import { synthesize } from "./agents/synthesizer";
+import { verify } from "./agents/verifier";
+import { ANTHROPIC_MODEL } from "./anthropic-client";
+import { getReasoningConfig } from "./reasoning-levels";
+
+import type {
+  SendFn,
+  PipelineError,
+  TraceData,
+  DomainProfile,
+  EvidenceItem,
+  Report,
+  ReasoningConfig,
+  CertaintyBuckets,
+} from "../shared/types";
 
 /**
  * Runs the full DoublyAI pipeline with SSE progress updates.
@@ -13,14 +24,15 @@ import { getReasoningConfig } from "./reasoning-levels.js";
  *   2. Research — gather evidence from sources
  *   3. Synthesize — draft findings + report structure
  *   4. Verify — adversarial review, add contrary evidence, assign certainty
- *
- * @param {string} query - The user's research query
- * @param {Function} send - SSE event sender: send(eventName, data)
- * @param {Function} isAborted - Returns true if the client disconnected
  */
-export async function runPipeline(query, send, isAborted = () => false, reasoningLevel) {
-  const pipelineStartTime = Date.now();
-  const config = getReasoningConfig(reasoningLevel);
+export async function runPipeline(
+  query: string,
+  send: SendFn,
+  isAborted: () => boolean = () => false,
+  reasoningLevel?: string
+): Promise<void> {
+  const pipelineStartTime: number = Date.now();
+  const config: ReasoningConfig = getReasoningConfig(reasoningLevel ?? "heavy");
 
   send("progress", {
     stage: "config",
@@ -30,7 +42,7 @@ export async function runPipeline(query, send, isAborted = () => false, reasonin
   });
 
   /** Tag an error with the pipeline stage it came from and emit error trace. */
-  function tagError(err, stage) {
+  function tagError(err: PipelineError, stage: string): PipelineError {
     err.stage = stage;
     // Emit error trace so frontend can show raw LLM output for failed stages
     if (err.agentTrace || err.rawOutput) {
@@ -58,13 +70,14 @@ export async function runPipeline(query, send, isAborted = () => false, reasonin
     ],
   });
 
-  let domainProfile, classifierTrace;
+  let domainProfile: DomainProfile;
+  let classifierTrace: TraceData;
   try {
     const classifierResult = await classifyDomain(query, send, config);
     domainProfile = classifierResult.result;
     classifierTrace = classifierResult.trace;
   } catch (err) {
-    throw tagError(err, "classifier");
+    throw tagError(err as PipelineError, "classifier");
   }
   if (isAborted()) return;
 
@@ -105,21 +118,22 @@ export async function runPipeline(query, send, isAborted = () => false, reasonin
     ],
   });
 
-  let evidence, researcherTrace;
+  let evidence: EvidenceItem[];
+  let researcherTrace: TraceData;
   try {
     const researcherResult = await research(query, domainProfile, send, config);
     evidence = researcherResult.result;
     researcherTrace = researcherResult.trace;
   } catch (err) {
-    throw tagError(err, "researcher");
+    throw tagError(err as PipelineError, "researcher");
   }
   if (isAborted()) return;
 
   // Compute evidence category breakdown
-  const categoryCounts = {};
+  const categoryCounts: Record<string, number> = {};
   if (Array.isArray(evidence)) {
-    evidence.forEach((e) => {
-      const cat = e.category || "uncategorized";
+    evidence.forEach((e: EvidenceItem) => {
+      const cat: string = e.category || "uncategorized";
       categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
     });
   }
@@ -129,7 +143,7 @@ export async function runPipeline(query, send, isAborted = () => false, reasonin
     message: `Gathered ${Array.isArray(evidence) ? evidence.length : 0} evidence items`,
     percent: 40,
     detail: Object.entries(categoryCounts)
-      .map(([cat, count]) => `${cat.replace(/_/g, " ")}: ${count}`)
+      .map(([cat, count]: [string, number]) => `${cat.replace(/_/g, " ")}: ${count}`)
       .join(" | "),
     stats: {
       model: researcherTrace.request?.model || ANTHROPIC_MODEL,
@@ -139,7 +153,7 @@ export async function runPipeline(query, send, isAborted = () => false, reasonin
       evidenceCount: Array.isArray(evidence) ? evidence.length : 0,
     },
     evidencePreview: Array.isArray(evidence)
-      ? evidence.slice(0, 5).map((e) => ({
+      ? evidence.slice(0, 5).map((e: EvidenceItem) => ({
           source: e.source,
           category: e.category,
           quote: e.quote?.slice(0, 100) + (e.quote?.length > 100 ? "..." : ""),
@@ -169,19 +183,20 @@ export async function runPipeline(query, send, isAborted = () => false, reasonin
     ],
   });
 
-  let draft, synthesizerTrace;
+  let draft: Report;
+  let synthesizerTrace: TraceData;
   try {
     const synthesizerResult = await synthesize(query, domainProfile, evidence, send, config);
     draft = synthesizerResult.result;
     synthesizerTrace = synthesizerResult.trace;
   } catch (err) {
-    throw tagError(err, "synthesizer");
+    throw tagError(err as PipelineError, "synthesizer");
   }
   if (isAborted()) return;
 
   // Compute section breakdown
-  const sectionBreakdown = (draft.sections || []).map((s) => {
-    const findingCount = (s.content || []).filter(
+  const sectionBreakdown: string[] = (draft.sections || []).map((s) => {
+    const findingCount: number = (s.content || []).filter(
       (c) => c.type === "finding"
     ).length;
     return `${s.title || s.id}: ${findingCount}`;
@@ -225,31 +240,33 @@ export async function runPipeline(query, send, isAborted = () => false, reasonin
     ],
   });
 
-  let report, verifierTrace;
+  let report: Report;
+  let verifierTrace: TraceData;
   try {
     const verifierResult = await verify(query, domainProfile, draft, send, config);
     report = verifierResult.result;
     verifierTrace = verifierResult.trace;
   } catch (err) {
-    throw tagError(err, "verifier");
+    throw tagError(err as PipelineError, "verifier");
   }
   if (isAborted()) return;
 
-  const findingsCount = report.findings?.length || 0;
-  const avgCertainty =
+  const findingsCount: number = report.findings?.length || 0;
+  const avgCertainty: number =
     findingsCount > 0
       ? Math.round(
-          report.findings.reduce((s, f) => s + (f.certainty || 0), 0) /
+          report.findings.reduce((s: number, f) => s + (f.certainty || 0), 0) /
             findingsCount
         )
       : 0;
 
-  const removedCount = (draft.findings?.length || 0) - findingsCount;
-  const certaintyBuckets = { high: 0, moderate: 0, mixed: 0, weak: 0 };
+  const removedCount: number = (draft.findings?.length || 0) - findingsCount;
+  const certaintyBuckets: CertaintyBuckets = { high: 0, moderate: 0, mixed: 0, weak: 0 };
   (report.findings || []).forEach((f) => {
-    if (f.certainty >= 90) certaintyBuckets.high++;
-    else if (f.certainty >= 70) certaintyBuckets.moderate++;
-    else if (f.certainty >= 50) certaintyBuckets.mixed++;
+    const c = f.certainty ?? 0;
+    if (c >= 90) certaintyBuckets.high++;
+    else if (c >= 70) certaintyBuckets.moderate++;
+    else if (c >= 50) certaintyBuckets.mixed++;
     else certaintyBuckets.weak++;
   });
 
@@ -278,7 +295,7 @@ export async function runPipeline(query, send, isAborted = () => false, reasonin
   });
 
   // ── Stage 5: Deliver ────────────────────────────────────────────────────────
-  const pipelineDurationMs = Date.now() - pipelineStartTime;
+  const pipelineDurationMs: number = Date.now() - pipelineStartTime;
 
   send("trace", {
     stage: "pipeline_summary",

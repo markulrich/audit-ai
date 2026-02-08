@@ -17,6 +17,7 @@ import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3
 import { readFile, writeFile, mkdir } from "fs/promises";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import type { Report } from "../shared/types";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LOCAL_DATA_DIR = join(__dirname, "..", ".data", "reports");
@@ -28,14 +29,29 @@ const S3_ENDPOINT = process.env.AWS_ENDPOINT_URL_S3;
 
 const useS3 = Boolean(BUCKET && S3_ENDPOINT);
 
-let s3;
+interface SlugMeta {
+  slug: string;
+  title: string;
+  ticker: string | null;
+  currentVersion: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface VersionSnapshot {
+  version: number;
+  publishedAt: string;
+  report: Report;
+}
+
+let s3: S3Client | undefined;
 if (useS3) {
   s3 = new S3Client({
     region: process.env.AWS_REGION || "auto",
     endpoint: S3_ENDPOINT,
     credentials: {
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
     },
   });
   console.log(`[storage] Using Tigris bucket: ${BUCKET}`);
@@ -45,9 +61,9 @@ if (useS3) {
 
 // ── Low-level helpers ───────────────────────────────────────────────────────────
 
-async function putObject(key, body) {
+async function putObject(key: string, body: unknown): Promise<void> {
   if (useS3) {
-    await s3.send(
+    await s3!.send(
       new PutObjectCommand({
         Bucket: BUCKET,
         Key: key,
@@ -62,33 +78,34 @@ async function putObject(key, body) {
   }
 }
 
-async function getObject(key) {
+async function getObject<T = unknown>(key: string): Promise<T | null> {
   if (useS3) {
     try {
-      const resp = await s3.send(
+      const resp = await s3!.send(
         new GetObjectCommand({ Bucket: BUCKET, Key: key })
       );
-      const text = await resp.Body.transformToString("utf-8");
-      return JSON.parse(text);
-    } catch (err) {
+      const text = await resp.Body!.transformToString("utf-8");
+      return JSON.parse(text) as T;
+    } catch (thrown: unknown) {
+      const err = thrown as { name?: string; $metadata?: { httpStatusCode?: number } };
       if (err.name === "NoSuchKey" || err.$metadata?.httpStatusCode === 404) return null;
-      throw err;
+      throw thrown;
     }
   } else {
     try {
       const filePath = join(LOCAL_DATA_DIR, key);
       const text = await readFile(filePath, "utf-8");
-      return JSON.parse(text);
-    } catch (err) {
-      if (err.code === "ENOENT") return null;
-      throw err;
+      return JSON.parse(text) as T;
+    } catch (thrown: unknown) {
+      if ((thrown as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw thrown;
     }
   }
 }
 
 // ── Slug generation ─────────────────────────────────────────────────────────────
 
-function generateSlug(meta) {
+function generateSlug(meta: Report["meta"]): string {
   const base = (meta?.ticker || meta?.title || "report")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -102,23 +119,19 @@ function generateSlug(meta) {
 
 // ── Public API ──────────────────────────────────────────────────────────────────
 
-/**
- * Publish a report. Creates a new version under an existing slug, or
- * generates a new slug if none is provided.
- *
- * @param {object} report  – The full report object { meta, sections, findings }
- * @param {string} [existingSlug] – Re-publish under an existing slug (new version)
- * @returns {{ slug: string, version: number, url: string }}
- */
-export async function publishReport(report, existingSlug) {
+export async function publishReport(
+  report: Report,
+  existingSlug?: string
+): Promise<{ slug: string; version: number; url: string }> {
   let slug = existingSlug;
-  let meta;
+  let meta: SlugMeta | undefined;
 
   if (slug) {
-    meta = await getObject(`reports/${slug}/meta.json`);
-    if (!meta) {
+    const existing = await getObject<SlugMeta>(`reports/${slug}/meta.json`);
+    if (!existing) {
       throw new Error(`Report slug "${slug}" not found`);
     }
+    meta = existing;
   }
 
   if (!slug) {
@@ -133,7 +146,7 @@ export async function publishReport(report, existingSlug) {
     };
   }
 
-  const version = meta.currentVersion + 1;
+  const version = meta!.currentVersion + 1;
 
   // Store the versioned snapshot
   await putObject(`reports/${slug}/v${version}.json`, {
@@ -143,28 +156,24 @@ export async function publishReport(report, existingSlug) {
   });
 
   // Update meta pointer
-  meta.currentVersion = version;
-  meta.updatedAt = new Date().toISOString();
-  meta.title = report.meta?.title || meta.title;
-  meta.ticker = report.meta?.ticker || meta.ticker;
+  meta!.currentVersion = version;
+  meta!.updatedAt = new Date().toISOString();
+  meta!.title = report.meta?.title || meta!.title;
+  meta!.ticker = report.meta?.ticker || meta!.ticker;
   await putObject(`reports/${slug}/meta.json`, meta);
 
   return { slug, version, url: `/reports/${slug}` };
 }
 
-/**
- * Retrieve a published report.
- *
- * @param {string} slug
- * @param {number} [version] – Specific version, or latest if omitted
- * @returns {{ meta, version, publishedAt, report } | null}
- */
-export async function getReport(slug, version) {
-  const meta = await getObject(`reports/${slug}/meta.json`);
+export async function getReport(
+  slug: string,
+  version?: number
+): Promise<{ slug: string; currentVersion: number; createdAt: string; version: number; publishedAt: string; report: Report } | null> {
+  const meta = await getObject<SlugMeta>(`reports/${slug}/meta.json`);
   if (!meta) return null;
 
   const v = version || meta.currentVersion;
-  const data = await getObject(`reports/${slug}/v${v}.json`);
+  const data = await getObject<VersionSnapshot>(`reports/${slug}/v${v}.json`);
   if (!data) return null;
 
   return {

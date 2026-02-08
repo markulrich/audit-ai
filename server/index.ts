@@ -8,12 +8,15 @@ process.on("unhandledRejection", (reason) => {
 });
 
 import express from "express";
+import type { Request, Response, NextFunction } from "express";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { runPipeline } from "./pipeline.js";
-import { publishReport, getReport } from "./storage.js";
+import { runPipeline } from "./pipeline";
+import { publishReport, getReport } from "./storage";
 
-import "./anthropic-client.js";
+import "./anthropic-client";
+
+import type { PipelineError, SendFn, Report } from "../shared/types";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -51,11 +54,11 @@ app.use((req, res, next) => {
 });
 
 // Simple in-memory rate limiter (no extra dependency)
-const rateLimitMap = new Map();
+const rateLimitMap = new Map<string, { windowStart: number; count: number }>();
 const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 min
 const RATE_LIMIT_MAX = 10; // max requests per window
 
-function rateLimit(req, res, next) {
+function rateLimit(req: Request, res: Response, next: NextFunction): void {
   const key = req.ip || "unknown";
   const now = Date.now();
   const entry = rateLimitMap.get(key);
@@ -67,9 +70,10 @@ function rateLimit(req, res, next) {
 
   entry.count++;
   if (entry.count > RATE_LIMIT_MAX) {
-    return res.status(429).json({
+    res.status(429).json({
       error: `Rate limit exceeded. Max ${RATE_LIMIT_MAX} reports per 15 minutes.`,
     });
+    return;
   }
   return next();
 }
@@ -89,8 +93,8 @@ if (process.env.NODE_ENV === "production") {
 
 // ── SSE endpoint: generate an explainable report ────────────────────────────
 
-app.post("/api/generate", rateLimit, async (req, res) => {
-  const { query, reasoningLevel } = req.body;
+app.post("/api/generate", rateLimit, async (req: Request, res: Response) => {
+  const { query, reasoningLevel } = req.body as { query: unknown; reasoningLevel?: string };
 
   // Input validation
   if (!query || typeof query !== "string" || query.trim().length < 3) {
@@ -119,7 +123,7 @@ app.post("/api/generate", rateLimit, async (req, res) => {
     if (!res.writableEnded) aborted = true;
   });
 
-  const send = (event, data) => {
+  const send: SendFn = (event: string, data: unknown): void => {
     if (!aborted && !res.writableEnded) {
       res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     }
@@ -135,7 +139,8 @@ app.post("/api/generate", rateLimit, async (req, res) => {
   try {
     await runPipeline(query.trim(), send, () => aborted, reasoningLevel);
     if (!aborted) send("done", { success: true });
-  } catch (err) {
+  } catch (thrown) {
+    const err = thrown as PipelineError;
     console.error("Pipeline error:", err);
     if (!aborted) {
       // Show detailed error info for debugging
@@ -157,7 +162,7 @@ app.post("/api/generate", rateLimit, async (req, res) => {
           ? `ANTHROPIC_API_KEY was rejected by the API (HTTP ${err.status}). Check that it is valid.`
           : err.status === 429
           ? `Anthropic API rate limit hit during ${err.stage || "pipeline"} stage: ${err.message || "Too many requests"}. Please wait a minute and try again.`
-          : err.status >= 500
+          : err.status && err.status >= 500
           ? `Upstream API error (HTTP ${err.status}). Please try again shortly.`
           : `Pipeline failed: ${err.message || "Unknown error"}`;
 
@@ -171,25 +176,26 @@ app.post("/api/generate", rateLimit, async (req, res) => {
 
 // ── Publish / retrieve reports ──────────────────────────────────────────────
 
-app.post("/api/reports/publish", async (req, res) => {
-  const { report, slug } = req.body;
+app.post("/api/reports/publish", async (req: Request, res: Response) => {
+  const { report, slug } = req.body as { report: unknown; slug?: string };
 
-  if (!report || typeof report !== "object" || !report.meta || !Array.isArray(report.sections) || !Array.isArray(report.findings)) {
+  if (!report || typeof report !== "object" || !("meta" in report) || !("sections" in report) || !Array.isArray((report as Record<string, unknown>).sections) || !Array.isArray((report as Record<string, unknown>).findings)) {
     return res.status(400).json({ error: "Invalid report payload" });
   }
 
   try {
-    const result = await publishReport(report, slug || undefined);
+    const result = await publishReport(report as Report, slug || undefined);
     res.json(result);
-  } catch (err) {
+  } catch (thrown: unknown) {
+    const err = thrown instanceof Error ? thrown : new Error(String(thrown));
     console.error("Publish error:", err);
     res.status(500).json({ error: err.message || "Failed to publish report" });
   }
 });
 
-app.get("/api/reports/:slug", async (req, res) => {
-  const { slug } = req.params;
-  const version = req.query.v ? parseInt(req.query.v, 10) : undefined;
+app.get("/api/reports/:slug", async (req: Request, res: Response) => {
+  const slug = req.params.slug as string;
+  const version = req.query.v ? parseInt(req.query.v as string, 10) : undefined;
 
   if (!slug || !/^[a-z0-9-]+$/.test(slug)) {
     return res.status(400).json({ error: "Invalid slug" });
@@ -199,7 +205,7 @@ app.get("/api/reports/:slug", async (req, res) => {
     const data = await getReport(slug, version);
     if (!data) return res.status(404).json({ error: "Report not found" });
     res.json(data);
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("Retrieve error:", err);
     res.status(500).json({ error: "Failed to retrieve report" });
   }
@@ -212,9 +218,9 @@ if (process.env.NODE_ENV === "production") {
   });
 }
 
-app.listen(PORT, "0.0.0.0", () => {
+app.listen(Number(PORT), "0.0.0.0", () => {
   console.log(`DoublyAI server running on http://0.0.0.0:${PORT}`);
-}).on("error", (err) => {
+}).on("error", (err: NodeJS.ErrnoException) => {
   console.error("LISTEN ERROR:", err.message, err.code);
   process.exit(1);
 });

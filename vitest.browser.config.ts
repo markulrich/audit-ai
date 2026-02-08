@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   test: {
     include: ["src/**/*.browser.test.{js,jsx,ts,tsx}"],
-    setupFiles: "./test/setup.js",
+    setupFiles: "./test/setup.ts",
     browser: {
       enabled: true,
       ui: false,
