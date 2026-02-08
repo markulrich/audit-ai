@@ -96,11 +96,26 @@ Respond with a JSON array of evidence items. JSON only, no markdown.`,
   } catch (e) {
     console.error("Research agent parse error:", e.message);
     const rawText = response.content?.[0]?.text || "";
+
+    // Try to extract a JSON array from surrounding commentary
     const match = rawText.match(/\[[\s\S]*\]/);
     if (match) {
-      const result = JSON.parse(match[0]);
-      return { result, trace: { ...trace, parsedOutput: { evidenceCount: result.length }, parseWarning: "Extracted via regex fallback" } };
+      try {
+        const result = JSON.parse(match[0]);
+        return { result, trace: { ...trace, parsedOutput: { evidenceCount: result.length }, parseWarning: "Extracted via regex fallback" } };
+      } catch (parseErr) {
+        console.error("Research agent regex fallback parse error:", parseErr.message);
+      }
     }
-    throw new Error("Research agent failed to produce valid evidence");
+
+    // Include the raw response snippet in the error for debugging
+    const preview = rawText.slice(0, 300);
+    const stopReason = response.stop_reason;
+    throw new Error(
+      `Research agent failed to produce valid JSON array. ` +
+      `Parse error: ${e.message}. ` +
+      `Stop reason: ${stopReason || "unknown"}. ` +
+      `Response preview: ${preview}${rawText.length > 300 ? "..." : ""}`
+    );
   }
 }
