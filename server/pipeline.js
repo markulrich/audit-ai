@@ -18,7 +18,7 @@ import { getReasoningConfig } from "./reasoning-levels.js";
  * @param {Function} send - SSE event sender: send(eventName, data)
  * @param {Function} isAborted - Returns true if the client disconnected
  */
-export async function runPipeline(query, send, isAborted = () => false, reasoningLevel = "medium") {
+export async function runPipeline(query, send, isAborted = () => false, reasoningLevel = "light") {
   const pipelineStartTime = Date.now();
   const reasoningConfig = getReasoningConfig(reasoningLevel);
   const modelLabel = reasoningConfig.model || ANTHROPIC_MODEL;

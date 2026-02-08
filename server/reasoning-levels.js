@@ -6,8 +6,8 @@
  *
  * X-Light → Haiku   — Fastest possible, speed over depth
  * Light   → Haiku   — Fast, cheaper, less thorough
- * Medium  → Sonnet  — Balanced (current default behavior)
- * Heavy   → Opus    — Most thorough, slowest, most expensive
+ * Heavy   → Sonnet  — Thorough and balanced
+ * X-Heavy → Opus    — Maximum depth and rigor
  */
 
 export const REASONING_LEVELS = {
@@ -75,9 +75,9 @@ export const REASONING_LEVELS = {
     },
   },
 
-  medium: {
-    label: "Medium",
-    description: "Balanced depth and speed",
+  heavy: {
+    label: "Heavy",
+    description: "Thorough and balanced",
     model: "claude-sonnet-4-5",
 
     classifier: {
@@ -107,8 +107,8 @@ export const REASONING_LEVELS = {
     },
   },
 
-  heavy: {
-    label: "Heavy",
+  xheavy: {
+    label: "X-Heavy",
     description: "Maximum depth and rigor",
     model: "claude-opus-4-6",
 
@@ -140,10 +140,10 @@ export const REASONING_LEVELS = {
   },
 };
 
-export const DEFAULT_REASONING_LEVEL = "medium";
+export const DEFAULT_REASONING_LEVEL = "light";
 
 /**
- * Returns the config for a given reasoning level, falling back to medium.
+ * Returns the config for a given reasoning level, falling back to light.
  */
 export function getReasoningConfig(level) {
   return REASONING_LEVELS[level] || REASONING_LEVELS[DEFAULT_REASONING_LEVEL];

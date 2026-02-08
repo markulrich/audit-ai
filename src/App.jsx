@@ -45,7 +45,7 @@ export default function App() {
   const [report, setReport] = useState(null);
   const [error, setError] = useState(null);
   const [traceData, setTraceData] = useState([]);
-  const [reasoningLevel, setReasoningLevel] = useState("medium");
+  const [reasoningLevel, setReasoningLevel] = useState("light");
   const abortRef = useRef(null);
 
   const handleGenerate = async (query) => {
