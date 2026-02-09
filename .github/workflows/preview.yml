@@ -54,7 +54,13 @@ jobs:
           if flyctl storage list --app "$PREVIEW_APP" 2>/dev/null | grep -q .; then
             echo "Storage already attached, skipping."
           else
-            flyctl storage update "$TIGRIS_BUCKET" --app "$PREVIEW_APP"
+            # Resolve the actual AddOn name from the production app (may differ from bucket name)
+            addon_name=$(flyctl storage list --app "$FLY_APP" --json 2>/dev/null | jq -r '.[0].Name // empty' 2>/dev/null)
+            if [ -z "$addon_name" ]; then
+              echo "::error::No Tigris storage AddOn found on production app $FLY_APP"
+              exit 1
+            fi
+            flyctl storage update "$addon_name" --app "$PREVIEW_APP"
           fi
 
       - name: Ensure S3/Tigris env vars are set
@@ -71,10 +77,21 @@ jobs:
             echo "$missing"
           }
 
+          # Resolve the actual Tigris AddOn name from production app
+          resolve_addon_name() {
+            flyctl storage list --app "$FLY_APP" --json 2>/dev/null | jq -r '.[0].Name // empty' 2>/dev/null
+          }
+
           missing=$(check_s3_vars)
           if [ -n "$missing" ]; then
             echo "::warning::Missing Tigris S3 env vars:$missing — re-attaching storage bucket..."
-            flyctl storage update "$TIGRIS_BUCKET" --app "$PREVIEW_APP"
+            addon_name=$(resolve_addon_name)
+            if [ -n "$addon_name" ]; then
+              flyctl storage update "$addon_name" --app "$PREVIEW_APP"
+            else
+              echo "::error::No Tigris storage AddOn found on production app $FLY_APP"
+              exit 1
+            fi
 
             missing=$(check_s3_vars)
             if [ -n "$missing" ]; then

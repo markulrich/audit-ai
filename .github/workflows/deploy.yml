@@ -89,10 +89,22 @@ jobs:
             echo "$missing"
           }
 
+          # Resolve the actual Tigris AddOn name (may differ from bucket name)
+          resolve_addon_name() {
+            local app="$1"
+            flyctl storage list --app "$app" --json 2>/dev/null | jq -r '.[0].Name // empty' 2>/dev/null
+          }
+
           missing=$(check_s3_vars)
           if [ -n "$missing" ]; then
             echo "::warning::Missing Tigris S3 env vars:$missing — re-attaching storage bucket..."
-            flyctl storage update "$TIGRIS_BUCKET" --app "$FLY_APP"
+            addon_name=$(resolve_addon_name "$FLY_APP")
+            if [ -n "$addon_name" ]; then
+              flyctl storage update "$addon_name" --app "$FLY_APP"
+            else
+              echo "No existing storage AddOn found — creating new one..."
+              flyctl storage create --app "$FLY_APP" --name "$TIGRIS_BUCKET"
+            fi
 
             missing=$(check_s3_vars)
             if [ -n "$missing" ]; then
