@@ -424,6 +424,34 @@ describe("job lifecycle integration", () => {
     });
   });
 
+  describe("memory safety — bounded event accumulation", () => {
+    it("caps progress events to prevent unbounded memory growth", async () => {
+      const send = createJobSendFn(jobId);
+
+      // Emit more than MAX_PROGRESS_EVENTS (200) progress events
+      for (let i = 0; i < 250; i++) {
+        send("progress", { stage: `step_${i}`, message: `Step ${i}`, percent: i % 100 });
+      }
+
+      const job = await getJob(jobId);
+      // Should be capped (first 10 + most recent 190 = 200)
+      expect(job!.progress.length).toBeLessThanOrEqual(200);
+      // First event should be preserved
+      expect(job!.progress[0].stage).toBe("step_0");
+    });
+
+    it("caps trace events to prevent unbounded growth", async () => {
+      const send = createJobSendFn(jobId);
+
+      for (let i = 0; i < 60; i++) {
+        send("trace", { stage: `trace_${i}`, agent: `Agent${i}`, trace: {} });
+      }
+
+      const job = await getJob(jobId);
+      expect(job!.traceEvents.length).toBeLessThanOrEqual(50);
+    });
+  });
+
   describe("edge cases", () => {
     it("getJob returns null for unknown ID", async () => {
       const result = await getJob("nonexistent-job-id");

@@ -32,6 +32,13 @@ import { putJobState, getJobState } from "./storage";
 const jobs = new Map<string, ReportJob>();
 const jobEmitters = new Map<string, EventEmitter>();
 
+/** Maximum progress events to keep per job (prevents unbounded memory growth) */
+const MAX_PROGRESS_EVENTS = 200;
+/** Maximum trace events to keep per job */
+const MAX_TRACE_EVENTS = 50;
+/** Maximum reasoning entries in work log */
+const MAX_WORK_LOG_REASONING = 100;
+
 /** Generate a unique job ID */
 export function generateJobId(): string {
   return `job-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -72,7 +79,9 @@ export function createJob(params: {
   };
 
   jobs.set(jobId, job);
-  jobEmitters.set(jobId, new EventEmitter());
+  const emitter = new EventEmitter();
+  emitter.setMaxListeners(20); // Prevent Node warning on many concurrent SSE connections
+  jobEmitters.set(jobId, emitter);
 
   return job;
 }
@@ -186,11 +195,21 @@ export function createJobSendFn(jobId: string): (event: string, data: unknown) =
     const job = jobs.get(jobId);
     if (!job) return;
 
-    // Accumulate progress and trace events
+    // Accumulate progress and trace events (bounded to prevent memory leaks)
     if (event === "progress") {
       job.progress.push(data as ProgressEvent);
+      if (job.progress.length > MAX_PROGRESS_EVENTS) {
+        // Keep the first 10 (planning) and the most recent events
+        job.progress = [
+          ...job.progress.slice(0, 10),
+          ...job.progress.slice(-MAX_PROGRESS_EVENTS + 10),
+        ];
+      }
     } else if (event === "trace") {
       job.traceEvents.push(data as TraceEvent);
+      if (job.traceEvents.length > MAX_TRACE_EVENTS) {
+        job.traceEvents = job.traceEvents.slice(-MAX_TRACE_EVENTS);
+      }
     } else if (event === "report") {
       job.currentReport = data as Report;
     } else if (event === "error") {
@@ -272,7 +291,11 @@ export function updateWorkLog(
 
   if (workLog.plan) job.workLog.plan = workLog.plan;
   if (workLog.invocations) job.workLog.invocations = workLog.invocations;
-  if (workLog.reasoning) job.workLog.reasoning = workLog.reasoning;
+  if (workLog.reasoning) {
+    job.workLog.reasoning = workLog.reasoning.length > MAX_WORK_LOG_REASONING
+      ? workLog.reasoning.slice(-MAX_WORK_LOG_REASONING)
+      : workLog.reasoning;
+  }
 
   broadcastJobEvent(jobId, "work_log", job.workLog);
 }

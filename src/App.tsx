@@ -20,6 +20,7 @@ import ReportsPage from "./components/ReportsPage";
 import HealthPage from "./components/HealthPage";
 import AttachmentUpload from "./components/AttachmentUpload";
 import AgentWorkLogView from "./components/AgentWorkLog";
+import ErrorBoundary from "./components/shared/ErrorBoundary";
 
 // ── SSE parsing ─────────────────────────────────────────────────────────────
 
@@ -1059,6 +1060,7 @@ export default function App() {
         overflow: "hidden",
         display: "flex",
       }}>
+        <ErrorBoundary>
         {currentReport ? (
           currentReport.meta?.outputFormat === "slide_deck" ? (
             <SlideDeckView
@@ -1188,6 +1190,7 @@ export default function App() {
             )}
           </div>
         )}
+        </ErrorBoundary>
       </div>
     </div>
   );
