@@ -625,4 +625,120 @@ describe("jobs", () => {
       expect(found).not.toBeNull();
     });
   });
+
+  describe("SSE replay behavior", () => {
+    it("accumulates all event types for replay", () => {
+      const job = createJob({ slug: "replay-test", query: "test", reasoningLevel: "x-light" });
+      const send = createJobSendFn(job.jobId);
+
+      // Simulate a full pipeline run
+      send("progress", { stage: "classifying", message: "Analyzing...", percent: 5 });
+      send("progress", { stage: "researching", message: "Gathering evidence...", percent: 30 });
+      send("trace", { stage: "classifier", agent: "Classifier", trace: {} });
+      send("report", { meta: { title: "NVDA Report" }, sections: [], findings: [] });
+
+      // Verify all events accumulated
+      expect(job.progress).toHaveLength(2);
+      expect(job.progress[0].stage).toBe("classifying");
+      expect(job.progress[1].stage).toBe("researching");
+      expect(job.traceEvents).toHaveLength(1);
+      expect(job.currentReport).not.toBeNull();
+      expect(job.currentReport!.meta.title).toBe("NVDA Report");
+    });
+
+    it("preserves progress order for reconnecting clients", () => {
+      const job = createJob({ slug: "order-test", query: "test", reasoningLevel: "x-light" });
+      const send = createJobSendFn(job.jobId);
+
+      // Send progress events in order
+      for (let i = 0; i < 10; i++) {
+        send("progress", { stage: `step-${i}`, message: `Step ${i}`, percent: i * 10 });
+      }
+
+      // Verify order preserved
+      expect(job.progress).toHaveLength(10);
+      for (let i = 0; i < 10; i++) {
+        expect(job.progress[i].stage).toBe(`step-${i}`);
+        expect(job.progress[i].percent).toBe(i * 10);
+      }
+    });
+
+    it("overwrites currentReport with latest version", () => {
+      const job = createJob({ slug: "overwrite-test", query: "test", reasoningLevel: "x-light" });
+      const send = createJobSendFn(job.jobId);
+
+      // First report (draft)
+      send("report", { meta: { title: "Draft" }, sections: [], findings: [] });
+      expect(job.currentReport!.meta.title).toBe("Draft");
+
+      // Second report (verified)
+      send("report", { meta: { title: "Final", overallCertainty: 85 }, sections: [], findings: [] });
+      expect(job.currentReport!.meta.title).toBe("Final");
+    });
+
+    it("new subscriber does not receive old events retroactively", () => {
+      const job = createJob({ slug: "no-retroactive", query: "test", reasoningLevel: "x-light" });
+      const send = createJobSendFn(job.jobId);
+
+      // Send events BEFORE subscribing
+      send("progress", { stage: "done", message: "Done", percent: 100 });
+
+      // Subscribe after events
+      const received: unknown[] = [];
+      subscribeToJob(job.jobId, (msg) => received.push(msg));
+
+      // No events should be received (subscribers get live events only)
+      expect(received).toHaveLength(0);
+
+      // But new events should be received
+      send("progress", { stage: "new", message: "New", percent: 0 });
+      expect(received).toHaveLength(1);
+    });
+  });
+
+  describe("edge cases", () => {
+    it("handles rapid succession of events", () => {
+      const job = createJob({ slug: "rapid-events", query: "test", reasoningLevel: "x-light" });
+      const received: unknown[] = [];
+      subscribeToJob(job.jobId, (msg) => received.push(msg));
+
+      // Blast 100 events
+      const send = createJobSendFn(job.jobId);
+      for (let i = 0; i < 100; i++) {
+        send("progress", { stage: `step-${i}`, message: `Step ${i}`, percent: i });
+      }
+
+      expect(received).toHaveLength(100);
+      expect(job.progress).toHaveLength(100);
+    });
+
+    it("handles multiple subscribers", () => {
+      const job = createJob({ slug: "multi-sub", query: "test", reasoningLevel: "x-light" });
+      const received1: unknown[] = [];
+      const received2: unknown[] = [];
+      const received3: unknown[] = [];
+
+      subscribeToJob(job.jobId, (msg) => received1.push(msg));
+      subscribeToJob(job.jobId, (msg) => received2.push(msg));
+      subscribeToJob(job.jobId, (msg) => received3.push(msg));
+
+      broadcastJobEvent(job.jobId, "test", { data: 1 });
+
+      expect(received1).toHaveLength(1);
+      expect(received2).toHaveLength(1);
+      expect(received3).toHaveLength(1);
+      expect(job.listenerCount).toBe(3);
+    });
+
+    it("updateJob handles partial updates correctly", async () => {
+      const job = createJob({ slug: "partial-update", query: "original query", reasoningLevel: "x-light" });
+
+      await updateJob(job.jobId, { status: "running" });
+
+      // Query should remain unchanged
+      expect(job.query).toBe("original query");
+      expect(job.status).toBe("running");
+      expect(job.slug).toBe("partial-update");
+    });
+  });
 });

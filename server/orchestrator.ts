@@ -301,12 +301,43 @@ export async function runOrchestrator(opts: OrchestratorOptions): Promise<Report
         ? 5 * 60 * 1000
         : 2 * 60 * 1000;
 
-      const invocation = await Promise.race([
-        executeSkill(step.skill as SkillName, ctx, input),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error(`Skill "${step.skill}" timed out after ${timeoutMs / 1000}s`)), timeoutMs)
-        ),
-      ]);
+      // Retry transient failures (rate limits, network errors) up to 2 times
+      const MAX_RETRIES = 2;
+      let invocation: Awaited<ReturnType<typeof executeSkill>> | undefined;
+      let lastError: Error | undefined;
+
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          invocation = await Promise.race([
+            executeSkill(step.skill as SkillName, ctx, input),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error(`Skill "${step.skill}" timed out after ${timeoutMs / 1000}s`)), timeoutMs)
+            ),
+          ]);
+          break; // Success — exit retry loop
+        } catch (retryErr) {
+          lastError = retryErr as Error;
+          const isTransient =
+            (lastError as PipelineError).status === 429 ||
+            (lastError as PipelineError).status === 503 ||
+            lastError.message?.includes("timed out") ||
+            lastError.message?.includes("ECONNRESET") ||
+            lastError.message?.includes("fetch failed");
+
+          if (isTransient && attempt < MAX_RETRIES) {
+            const backoffMs = (attempt + 1) * 3000; // 3s, 6s
+            workLog.reasoning.push(
+              `Retrying "${step.skill}" after transient error (attempt ${attempt + 1}/${MAX_RETRIES}): ${lastError.message}`
+            );
+            send("work_log", workLog);
+            await new Promise((r) => setTimeout(r, backoffMs));
+            continue;
+          }
+          throw lastError;
+        }
+      }
+
+      if (!invocation) throw lastError || new Error("Skill execution failed");
       workLog.invocations.push(invocation);
       step.status = invocation.status === "completed" ? "completed" : "failed";
 

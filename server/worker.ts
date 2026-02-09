@@ -792,9 +792,25 @@ async function main(): Promise<void> {
       process.exit(0);
     }, 5000);
   } catch (err) {
-    console.error("[worker] Fatal error:", err);
+    const error = err as Error & { status?: number; stage?: string };
+    console.error("[worker] Fatal error:", error);
+
     state.status = "failed";
-    state.error = (err as Error).message;
+    // Provide a user-friendly error message
+    if (error.status === 429) {
+      state.error = "Rate limit exceeded. The AI provider is temporarily throttling requests. Please try again in a few minutes.";
+    } else if (error.status === 401 || error.status === 403) {
+      state.error = "Authentication failed with the AI provider. Please check your API key configuration.";
+    } else if (error.message?.includes("timed out") || error.message?.includes("ETIMEDOUT")) {
+      state.error = "The request timed out. The AI provider may be experiencing high load. Please try again.";
+    } else {
+      state.error = error.message || "An unexpected error occurred during report generation.";
+    }
+
+    // Persist partial results if available
+    if (draftReport && !state.currentReport) {
+      state.currentReport = draftReport;
+    }
     await persistState();
 
     setTimeout(() => process.exit(1), 5000);

@@ -66,6 +66,10 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 const MAX_QUERY_LENGTH = 5000;
+const MAX_ATTACHMENTS_PER_REPORT = 10;
+
+// Track concurrent uploads per slug to prevent abuse
+const activeUploads = new Map<string, number>();
 
 // ── Middleware ───────────────────────────────────────────────────────────────
 
@@ -625,6 +629,21 @@ app.post("/api/reports/:slug/attachments", async (req: Request, res: Response) =
     return res.status(400).json({ error: validation.error });
   }
 
+  // Check attachment count limit
+  const existingJob = getLatestJobForSlug(slug);
+  if (existingJob && existingJob.attachments.length >= MAX_ATTACHMENTS_PER_REPORT) {
+    return res.status(400).json({
+      error: `Maximum ${MAX_ATTACHMENTS_PER_REPORT} attachments per report reached`,
+    });
+  }
+
+  // Concurrent upload protection (max 3 simultaneous per slug)
+  const concurrent = activeUploads.get(slug) || 0;
+  if (concurrent >= 3) {
+    return res.status(429).json({ error: "Too many concurrent uploads. Please wait." });
+  }
+  activeUploads.set(slug, concurrent + 1);
+
   try {
     const attachment = await uploadAttachment(slug, filename, mimeType, buffer);
 
@@ -638,6 +657,13 @@ app.post("/api/reports/:slug/attachments", async (req: Request, res: Response) =
   } catch (err: unknown) {
     console.error("Upload error:", err);
     res.status(500).json({ error: "Failed to upload attachment" });
+  } finally {
+    const current = activeUploads.get(slug) || 1;
+    if (current <= 1) {
+      activeUploads.delete(slug);
+    } else {
+      activeUploads.set(slug, current - 1);
+    }
   }
 });
 

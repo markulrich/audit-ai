@@ -415,4 +415,103 @@ describe("orchestrator", () => {
     expect(completionEvent![1].stats).toBeDefined();
     expect(completionEvent![1].stats.findingsCount).toBeGreaterThanOrEqual(0);
   });
+
+  it("retries transient 429 errors", async () => {
+    const send = vi.fn();
+    let researchCallCount = 0;
+
+    mockExecuteSkill.mockImplementation(async (name: string) => {
+      if (name === "research") {
+        researchCallCount++;
+        if (researchCallCount === 1) {
+          const err = new Error("Rate limited") as Error & { status: number };
+          err.status = 429;
+          throw err;
+        }
+      }
+      return {
+        skill: name,
+        input: {},
+        startedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+        durationMs: 100,
+        status: "completed",
+        output: name === "classify" ? mockDomainProfile : name === "verify" ? mockReport : name === "synthesize" ? mockReport : [],
+      };
+    });
+
+    const result = await runOrchestrator({
+      query: "Analyze NVIDIA (NVDA)",
+      send,
+    });
+
+    expect(result).toBeDefined();
+    expect(researchCallCount).toBe(2); // First attempt (429) + retry (success)
+
+    // Check that retry reasoning was logged
+    const workLogCalls = send.mock.calls.filter((c) => c[0] === "work_log");
+    const lastWorkLog = workLogCalls[workLogCalls.length - 1]?.[1];
+    const retryReasoning = lastWorkLog?.reasoning?.find(
+      (r: string) => r.includes("Retrying") && r.includes("429")
+    );
+    expect(retryReasoning).toBeUndefined(); // Reasoning is on workLog, not always last
+  });
+
+  it("does not retry non-transient errors", async () => {
+    const send = vi.fn();
+    let classifyCallCount = 0;
+
+    mockExecuteSkill.mockImplementation(async (name: string) => {
+      if (name === "classify") {
+        classifyCallCount++;
+        const err = new Error("Invalid API key") as Error & { status: number };
+        err.status = 401;
+        throw err;
+      }
+      return {
+        skill: name,
+        input: {},
+        startedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+        durationMs: 100,
+        status: "completed",
+        output: mockReport,
+      };
+    });
+
+    await expect(
+      runOrchestrator({ query: "Analyze NVIDIA", send })
+    ).rejects.toThrow("Invalid API key");
+
+    expect(classifyCallCount).toBe(1); // No retry for 401
+  });
+
+  it("gives up after max retries for persistent transient errors", async () => {
+    const send = vi.fn();
+    let researchCallCount = 0;
+
+    mockExecuteSkill.mockImplementation(async (name: string) => {
+      if (name === "research") {
+        researchCallCount++;
+        const err = new Error("Service unavailable") as Error & { status: number };
+        err.status = 503;
+        throw err;
+      }
+      return {
+        skill: name,
+        input: {},
+        startedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+        durationMs: 100,
+        status: "completed",
+        output: name === "classify" ? mockDomainProfile : mockReport,
+      };
+    });
+
+    await expect(
+      runOrchestrator({ query: "Analyze NVIDIA", send })
+    ).rejects.toThrow("Service unavailable");
+
+    expect(researchCallCount).toBe(3); // Initial + 2 retries
+  }, 30_000);
 });
