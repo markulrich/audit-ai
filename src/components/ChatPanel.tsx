@@ -54,94 +54,6 @@ interface Props {
   saveState?: SaveState;
 }
 
-function ProgressInline({ progress, error }: { progress: ProgressEvent[]; error: ErrorInfo | null }) {
-  if (progress.length === 0 && !error) return null;
-
-  const latest = progress[progress.length - 1];
-  const percent = latest?.percent || 0;
-
-  const stages = [
-    { key: "classifying", doneKey: "classified", label: "Classifying", doneLabel: "Classified", color: "#6366f1" },
-    { key: "researching", doneKey: "researched", label: "Researching", doneLabel: "Researched", color: "#0891b2" },
-    { key: "synthesizing", doneKey: "synthesized", label: "Synthesizing", doneLabel: "Synthesized", color: "#059669" },
-    { key: "verifying", doneKey: "verified", label: "Verifying", doneLabel: "Verified", color: "#d97706" },
-  ];
-
-  const stageMap: Record<string, ProgressEvent> = {};
-  progress.forEach((s) => { stageMap[s.stage] = s; });
-
-  return (
-    <div style={{ padding: "8px 0" }}>
-      {/* Mini progress bar */}
-      <div style={{
-        height: 2,
-        background: COLORS.border,
-        borderRadius: 1,
-        overflow: "hidden",
-        marginBottom: 8,
-      }}>
-        <div style={{
-          height: "100%",
-          width: `${percent}%`,
-          background: `linear-gradient(90deg, #6366f1, #0891b2, #059669, #d97706)`,
-          backgroundSize: "400% 100%",
-          borderRadius: 1,
-          transition: "width 0.5s ease",
-        }} />
-      </div>
-
-      {/* Stage indicators */}
-      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-        {stages.map((stage) => {
-          const isDone = !!stageMap[stage.doneKey];
-          const isActive = !!stageMap[stage.key] && !isDone;
-          const isPending = !stageMap[stage.key];
-
-          return (
-            <span
-              key={stage.key}
-              style={{
-                fontSize: 10,
-                fontWeight: isDone || isActive ? 600 : 400,
-                color: isDone ? stage.color : isActive ? stage.color : COLORS.textMuted,
-                opacity: isPending ? 0.4 : 1,
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 3,
-              }}
-            >
-              {isDone ? "\u2713" : isActive ? "\u25CF" : "\u25CB"}
-              {isDone ? stage.doneLabel : stage.label}
-            </span>
-          );
-        })}
-      </div>
-
-      {/* Current message */}
-      {latest?.message && (
-        <div style={{ fontSize: 11, color: COLORS.textSecondary, marginTop: 4, fontStyle: "italic" }}>
-          {latest.message}
-        </div>
-      )}
-
-      {/* Error display */}
-      {error && (
-        <div style={{
-          marginTop: 6,
-          padding: "6px 8px",
-          background: COLORS.red + "08",
-          border: `1px solid ${COLORS.red}20`,
-          borderRadius: 4,
-          fontSize: 11,
-          color: COLORS.red,
-        }}>
-          {error.message}
-        </div>
-      )}
-    </div>
-  );
-}
-
 export default function ChatPanel({
   messages,
   isGenerating,
@@ -351,12 +263,6 @@ export default function ChatPanel({
               {msg.content}
             </div>
 
-            {/* Inline progress for past assistant messages */}
-            {msg.role === "assistant" && msg.progress && msg.progress.length > 0 && (
-              <div style={{ maxWidth: "90%", marginTop: 4, paddingLeft: 4 }}>
-                <ProgressInline progress={msg.progress} error={msg.error || null} />
-              </div>
-            )}
           </div>
         ))}
 
