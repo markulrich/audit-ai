@@ -12,7 +12,6 @@ import type {
 import QueryInput from "./components/QueryInput";
 import ChatPanel from "./components/ChatPanel";
 import ReportView from "./components/Report";
-import ProgressStream from "./components/ProgressStream";
 import ReportsPage from "./components/ReportsPage";
 import HealthPage from "./components/HealthPage";
 
@@ -653,10 +652,7 @@ export default function App() {
     );
   }
 
-  // ── Report page: 3-column layout (Chat | Progress/Report | Explanation) ───
-
-  // Show ProgressStream when generating and no report yet (first query)
-  const showFullProgress = isGenerating && !currentReport;
+  // ── Report page: 3-column layout (Chat+Progress | Report | Explanation) ────
 
   return (
     <div style={{
@@ -666,11 +662,11 @@ export default function App() {
       overflow: "hidden",
       background: "#fafafa",
     }}>
-      {/* Left: Chat panel */}
+      {/* Left: Chat panel (includes full ProgressStream during generation) */}
       <div style={{
-        flex: "0 0 360px",
-        minWidth: 300,
-        maxWidth: 420,
+        flex: "0 0 420px",
+        minWidth: 340,
+        maxWidth: 500,
         overflow: "hidden",
       }}>
         <ChatPanel
@@ -678,6 +674,7 @@ export default function App() {
           isGenerating={isGenerating}
           liveProgress={liveProgress}
           liveError={liveError}
+          liveTraceData={currentTraceData}
           onSend={handleSend}
           onAbort={handleAbort}
           onNewConversation={handleNewConversation}
@@ -693,37 +690,7 @@ export default function App() {
         overflow: "hidden",
         display: "flex",
       }}>
-        {showFullProgress ? (
-          /* During first generation, show full ProgressStream */
-          <div style={{
-            flex: 1,
-            overflow: "auto",
-            padding: "32px 40px",
-            fontFamily: "'Inter', 'Helvetica Neue', system-ui, sans-serif",
-          }}>
-            <div style={{ maxWidth: 800, margin: "0 auto" }}>
-              <div style={{ marginBottom: 24 }}>
-                <h1 style={{
-                  fontSize: 28,
-                  fontWeight: 800,
-                  letterSpacing: -1,
-                  color: COLORS.text,
-                  margin: "0 0 4px",
-                }}>
-                  Doubly<span style={{ color: COLORS.orange }}>AI</span>
-                </h1>
-                <p style={{ fontSize: 13, color: COLORS.textMuted, margin: 0 }}>
-                  Generating your research report...
-                </p>
-              </div>
-              <ProgressStream
-                steps={liveProgress}
-                traceData={currentTraceData}
-                error={liveError}
-              />
-            </div>
-          </div>
-        ) : currentReport ? (
+        {currentReport ? (
           <ReportView
             data={currentReport}
             traceData={currentTraceData}
@@ -732,7 +699,7 @@ export default function App() {
             saveState={saveState}
           />
         ) : (
-          /* Empty state — slug exists but no report yet and not generating */
+          /* Empty state — waiting for report */
           <div style={{
             flex: 1,
             display: "flex",
@@ -746,8 +713,28 @@ export default function App() {
               Doubly<span style={{ color: "#b45309" }}>AI</span>
             </div>
             <p style={{ fontSize: 14, fontWeight: 500, maxWidth: 400, textAlign: "center", lineHeight: 1.6 }}>
-              Start a conversation to generate an interactive research report.
+              {isGenerating
+                ? "Generating your research report..."
+                : "Start a conversation to generate an interactive research report."}
             </p>
+            {isGenerating && (
+              <div style={{
+                marginTop: 24,
+                width: 200,
+                height: 2,
+                background: "#e2e4ea",
+                borderRadius: 1,
+                overflow: "hidden",
+              }}>
+                <div style={{
+                  height: "100%",
+                  width: `${liveProgress.length > 0 ? liveProgress[liveProgress.length - 1].percent : 5}%`,
+                  background: "linear-gradient(90deg, #6366f1, #0891b2, #059669, #d97706)",
+                  backgroundSize: "400% 100%",
+                  transition: "width 0.5s ease",
+                }} />
+              </div>
+            )}
           </div>
         )}
       </div>

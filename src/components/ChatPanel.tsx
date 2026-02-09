@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
-import type { ChatMessage, ProgressEvent, ErrorInfo } from "../../shared/types";
+import type { ChatMessage, ProgressEvent, ErrorInfo, TraceEvent } from "../../shared/types";
+import ProgressStream from "./ProgressStream";
 
 const COLORS = {
   bg: "#f7f7fa",
@@ -44,6 +45,7 @@ interface Props {
   isGenerating: boolean;
   liveProgress: ProgressEvent[];
   liveError: ErrorInfo | null;
+  liveTraceData: TraceEvent[];
   onSend: (message: string) => void;
   onAbort: () => void;
   onNewConversation: () => void;
@@ -145,6 +147,7 @@ export default function ChatPanel({
   isGenerating,
   liveProgress,
   liveError,
+  liveTraceData,
   onSend,
   onAbort,
   onNewConversation,
@@ -357,34 +360,14 @@ export default function ChatPanel({
           </div>
         ))}
 
-        {/* Live progress for current generation */}
+        {/* Live progress for current generation — full ProgressStream with LLM details */}
         {isGenerating && (
-          <div style={{
-            marginBottom: 12,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "flex-start",
-          }}>
-            <span style={{
-              fontSize: 9,
-              fontWeight: 600,
-              textTransform: "uppercase",
-              letterSpacing: 0.8,
-              color: COLORS.textMuted,
-              marginBottom: 3,
-              padding: "0 4px",
-            }}>
-              DoublyAI
-            </span>
-            <div style={{
-              maxWidth: "90%",
-              padding: "8px 12px",
-              borderRadius: "12px 12px 12px 2px",
-              background: COLORS.assistantBubble,
-              border: `1px solid ${COLORS.border}`,
-            }}>
-              <ProgressInline progress={liveProgress} error={liveError} />
-            </div>
+          <div style={{ marginBottom: 12 }}>
+            <ProgressStream
+              steps={liveProgress}
+              traceData={liveTraceData}
+              error={liveError}
+            />
           </div>
         )}
 
