@@ -18,6 +18,9 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@aws-sdk/client-s3": "^3.985.0",
+    "@statsig/react-bindings": "^3.31.2",
+    "@statsig/session-replay": "^3.31.2",
+    "@statsig/web-analytics": "^3.31.2",
     "express": "^4.21.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
