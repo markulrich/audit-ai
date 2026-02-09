@@ -10,7 +10,9 @@ concurrency:
 
 env:
   FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+  FLY_APP: audit-ai
   PREVIEW_APP: audit-ai-pr-${{ github.event.pull_request.number }}
+  TIGRIS_BUCKET: audit-ai-reports
 
 jobs:
   deploy-preview:
@@ -25,10 +27,6 @@ jobs:
           missing=""
           if [ -z "$FLY_API_TOKEN" ]; then missing="$missing FLY_API_TOKEN"; fi
           if [ -z "$ANTHROPIC_API_KEY" ]; then missing="$missing ANTHROPIC_API_KEY"; fi
-          if [ -z "$BUCKET_NAME" ]; then missing="$missing BUCKET_NAME"; fi
-          if [ -z "$AWS_ENDPOINT_URL_S3" ]; then missing="$missing AWS_ENDPOINT_URL_S3"; fi
-          if [ -z "$AWS_ACCESS_KEY_ID" ]; then missing="$missing AWS_ACCESS_KEY_ID"; fi
-          if [ -z "$AWS_SECRET_ACCESS_KEY" ]; then missing="$missing AWS_SECRET_ACCESS_KEY"; fi
           if [ -n "$missing" ]; then
             echo "::error::Missing required repo secrets:$missing"
             echo "Add them at: Settings → Secrets and variables → Actions"
@@ -36,10 +34,6 @@ jobs:
           fi
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          BUCKET_NAME: ${{ secrets.BUCKET_NAME }}
-          AWS_ENDPOINT_URL_S3: ${{ secrets.AWS_ENDPOINT_URL_S3 }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,21 +46,23 @@ jobs:
           flyctl apps list | grep -q "$PREVIEW_APP" || \
             flyctl apps create "$PREVIEW_APP" --org personal
 
-      - name: Set secrets (shared with production)
+      - name: Share production Tigris bucket with preview app
         run: |
-          flyctl secrets set \
-            ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
-            BUCKET_NAME="$BUCKET_NAME" \
-            AWS_ENDPOINT_URL_S3="$AWS_ENDPOINT_URL_S3" \
-            AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
-            AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+          # Grants the preview app access to the production bucket.
+          # Auto-sets BUCKET_NAME, AWS_ENDPOINT_URL_S3, AWS_ACCESS_KEY_ID,
+          # AWS_SECRET_ACCESS_KEY on the preview app.
+          if flyctl storage list --app "$PREVIEW_APP" 2>/dev/null | grep -q .; then
+            echo "Storage already attached, skipping."
+          else
+            flyctl storage update "$TIGRIS_BUCKET" --app "$PREVIEW_APP"
+          fi
+
+      - name: Set Anthropic key
+        run: |
+          flyctl secrets set ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
             --app "$PREVIEW_APP" --stage
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          BUCKET_NAME: ${{ secrets.BUCKET_NAME }}
-          AWS_ENDPOINT_URL_S3: ${{ secrets.AWS_ENDPOINT_URL_S3 }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
       - name: Deploy preview
         run: |

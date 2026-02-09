@@ -10,6 +10,8 @@ concurrency:
 
 env:
   FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+  FLY_APP: audit-ai
+  TIGRIS_BUCKET: audit-ai-reports
 
 jobs:
   test:
@@ -44,26 +46,13 @@ jobs:
           missing=""
           if [ -z "$FLY_API_TOKEN" ]; then missing="$missing FLY_API_TOKEN"; fi
           if [ -z "$ANTHROPIC_API_KEY" ]; then missing="$missing ANTHROPIC_API_KEY"; fi
-          if [ -z "$BUCKET_NAME" ]; then missing="$missing BUCKET_NAME"; fi
-          if [ -z "$AWS_ENDPOINT_URL_S3" ]; then missing="$missing AWS_ENDPOINT_URL_S3"; fi
-          if [ -z "$AWS_ACCESS_KEY_ID" ]; then missing="$missing AWS_ACCESS_KEY_ID"; fi
-          if [ -z "$AWS_SECRET_ACCESS_KEY" ]; then missing="$missing AWS_SECRET_ACCESS_KEY"; fi
           if [ -n "$missing" ]; then
             echo "::error::Missing required repo secrets:$missing"
             echo "Add them at: Settings → Secrets and variables → Actions"
-            echo ""
-            echo "If this is a first deploy, run locally:"
-            echo "  fly storage create --app audit-ai --name audit-ai-reports"
-            echo "  fly secrets list --app audit-ai"
-            echo "Then add the S3 values as GitHub repo secrets."
             exit 1
           fi
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          BUCKET_NAME: ${{ secrets.BUCKET_NAME }}
-          AWS_ENDPOINT_URL_S3: ${{ secrets.AWS_ENDPOINT_URL_S3 }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -73,32 +62,25 @@ jobs:
 
       - name: Create app (if needed)
         run: |
-          flyctl apps list | grep -q "audit-ai" || \
-            flyctl apps create audit-ai --org personal
+          flyctl apps list | grep -q "$FLY_APP" || \
+            flyctl apps create "$FLY_APP" --org personal
 
       - name: Provision Tigris storage (if needed)
         run: |
-          if flyctl storage list --app audit-ai 2>/dev/null | grep -q .; then
+          # fly storage create auto-sets BUCKET_NAME, AWS_ENDPOINT_URL_S3,
+          # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY on the app.
+          if flyctl storage list --app "$FLY_APP" 2>/dev/null | grep -q .; then
             echo "Storage already provisioned, skipping."
           else
-            flyctl storage create --app audit-ai --name audit-ai-reports
+            flyctl storage create --app "$FLY_APP" --name "$TIGRIS_BUCKET"
           fi
 
-      - name: Set secrets
+      - name: Set Anthropic key
         run: |
-          flyctl secrets set \
-            ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
-            BUCKET_NAME="$BUCKET_NAME" \
-            AWS_ENDPOINT_URL_S3="$AWS_ENDPOINT_URL_S3" \
-            AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
-            AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
-            --app audit-ai --stage
+          flyctl secrets set ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
+            --app "$FLY_APP" --stage
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          BUCKET_NAME: ${{ secrets.BUCKET_NAME }}
-          AWS_ENDPOINT_URL_S3: ${{ secrets.AWS_ENDPOINT_URL_S3 }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
       - name: Deploy to production
-        run: flyctl deploy
+        run: flyctl deploy --app "$FLY_APP"
