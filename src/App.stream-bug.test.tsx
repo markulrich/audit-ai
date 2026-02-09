@@ -51,9 +51,68 @@ interface Report {
   findings: unknown[];
 }
 
+// Mock JSON response helper
+function createJsonResponse(data: unknown) {
+  return {
+    ok: true,
+    json: () => Promise.resolve(data),
+    body: null,
+  };
+}
+
+// Mock classify response (returned by /api/classify)
+function createClassifyResponse() {
+  return createJsonResponse({
+    slug: "nvda-test",
+    domainProfile: {
+      domain: "equity_research",
+      domainLabel: "Equity Research",
+      ticker: "NVDA",
+      companyName: "NVIDIA Corporation",
+      focusAreas: ["financials"],
+      timeframe: "current",
+      sourceHierarchy: [],
+      certaintyRubric: "factual_verification",
+      evidenceStyle: "quantitative",
+      contraryThreshold: "any_contradiction_lowers_score",
+      toneTemplate: "investment_bank_equity_research",
+      sections: [],
+      reportMeta: { ratingOptions: [] },
+    },
+    trace: {},
+  });
+}
+
+/**
+ * Smart fetch mock that routes requests to appropriate responses:
+ * - /api/classify → classify JSON response
+ * - /api/reports/save → save JSON response
+ * - /api/chat → SSE response
+ */
+function mockFetchForHomepage(sseResponse: ChunkedSseResponse) {
+  return vi.fn().mockImplementation((url: string) => {
+    if (typeof url === "string" && url.includes("/api/classify")) {
+      return Promise.resolve(createClassifyResponse());
+    }
+    if (typeof url === "string" && url.includes("/api/reports/save")) {
+      return Promise.resolve(createJsonResponse({ slug: "nvda-test", version: 1, url: "/reports/nvda-test" }));
+    }
+    return Promise.resolve(sseResponse);
+  });
+}
+
+// Helper: submit a query via the homepage QueryInput example chips
+async function submitFromHomepage(user: ReturnType<typeof userEvent.setup>, queryText: string) {
+  // Homepage shows QueryInput with example chip buttons
+  const chip = screen.getByRole("button", { name: queryText });
+  await user.click(chip);
+}
+
 describe("App SSE parsing", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    // Reset URL that may have been changed by navigation
+    window.history.pushState(null, "", "/");
   });
 
   it("renders a report when event and data are in the same chunk", async () => {
@@ -73,7 +132,7 @@ describe("App SSE parsing", () => {
 
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
+      mockFetchForHomepage(
         createChunkedSseResponse([
           `event: report\ndata: ${JSON.stringify(report)}\n\n`,
           "event: done\ndata: {\"success\":true}\n\n",
@@ -83,7 +142,7 @@ describe("App SSE parsing", () => {
 
     render(<App />);
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Analyze NVIDIA (NVDA)" }));
+    await submitFromHomepage(user, "Analyze NVIDIA (NVDA)");
 
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "NVIDIA (NVDA)" })).toBeInTheDocument();
@@ -107,7 +166,7 @@ describe("App SSE parsing", () => {
 
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
+      mockFetchForHomepage(
         createChunkedSseResponse([
           "event: progress\n",
           'data: {"stage":"classifying","message":"Analyzing your query...","percent":5}\n\n',
@@ -121,7 +180,7 @@ describe("App SSE parsing", () => {
 
     render(<App />);
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Analyze NVIDIA (NVDA)" }));
+    await submitFromHomepage(user, "Analyze NVIDIA (NVDA)");
 
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "NVIDIA (NVDA)" })).toBeInTheDocument();
@@ -145,7 +204,7 @@ describe("App SSE parsing", () => {
 
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
+      mockFetchForHomepage(
         createChunkedSseResponse([
           "event: report\n",
           `data:${JSON.stringify(report)}\n\n`,
@@ -155,7 +214,7 @@ describe("App SSE parsing", () => {
 
     render(<App />);
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Analyze NVIDIA (NVDA)" }));
+    await submitFromHomepage(user, "Analyze NVIDIA (NVDA)");
 
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "NVIDIA (NVDA)" })).toBeInTheDocument();
@@ -179,24 +238,24 @@ describe("App SSE parsing", () => {
 
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
+      mockFetchForHomepage(
         createChunkedSseResponse([JSON.stringify(report)])
       )
     );
 
     render(<App />);
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Analyze NVIDIA (NVDA)" }));
+    await submitFromHomepage(user, "Analyze NVIDIA (NVDA)");
 
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "NVIDIA (NVDA)" })).toBeInTheDocument();
     });
   });
 
-  it("shows backend error when stream contains progress then error", async () => {
+  it("shows error message when stream contains progress then error", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
+      mockFetchForHomepage(
         createChunkedSseResponse([
           "event: progress\n",
           'data: {"stage":"classifying","message":"Analyzing your query...","percent":5}\n\n',
@@ -208,13 +267,11 @@ describe("App SSE parsing", () => {
 
     render(<App />);
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Analyze NVIDIA (NVDA)" }));
+    await submitFromHomepage(user, "Analyze NVIDIA (NVDA)");
 
     await waitFor(() => {
-      expect(screen.getByText("Generation Failed")).toBeInTheDocument();
+      const matches = screen.getAllByText("Report generation failed. Please try a different query.");
+      expect(matches.length).toBeGreaterThanOrEqual(1);
     });
-    expect(
-      screen.getByText("Report generation failed. Please try a different query.")
-    ).toBeInTheDocument();
   });
 });

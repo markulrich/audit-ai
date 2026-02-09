@@ -255,3 +255,22 @@ export interface PipelineError extends Error {
   agentTrace?: TraceData;
   rawOutput?: string;
 }
+
+// ── Chat / Conversation Types ──────────────────────────────────────────────
+
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: number;
+  reportVersion?: number;
+  progress?: ProgressEvent[];
+  traceData?: TraceEvent[];
+  error?: ErrorInfo | null;
+}
+
+export interface ConversationContext {
+  conversationId: string;
+  previousReport?: Report | null;
+  messageHistory?: Array<{ role: string; content: string }>;
+}

@@ -10,6 +10,7 @@ import type {
   AgentResult,
   TraceData,
   PipelineError,
+  ConversationContext,
 } from "../../shared/types";
 
 /**
@@ -58,112 +59,68 @@ export async function verify(
   domainProfile: DomainProfile,
   draft: Report,
   send: SendFn | undefined,
-  config: Partial<ReasoningConfig> = {}
+  config: Partial<ReasoningConfig> = {},
+  conversationContext?: ConversationContext,
 ): Promise<AgentResult<Report>> {
   const { ticker, companyName } = domainProfile;
   const methodologyLength = config.methodologyLength || "3-5 sentences";
   const methodologySources = config.methodologySources || "3-4";
   const removalThreshold = config.removalThreshold ?? 25;
 
+  // Build conversation context for follow-ups
+  let contextSection = "";
+  if (conversationContext?.previousReport) {
+    const recentMessages = (conversationContext.messageHistory || [])
+      .slice(-4)
+      .map((m) => `${m.role}: ${m.content}`)
+      .join("\n");
+
+    contextSection = `
+CONVERSATION CONTEXT:
+This is a follow-up verification. The user has been iterating on this report.
+
+Recent conversation:
+${recentMessages}
+
+Pay special attention to areas the user mentioned — they may have flagged specific concerns.`;
+  }
+
   const params = {
     ...(config.verifierModel && { model: config.verifierModel }),
-    system: `You are an adversarial fact-checker and research quality auditor. Your job is to find problems with every finding in a draft equity research report.
+    system: `You are an adversarial fact-checker reviewing a draft equity research report on ${companyName} (${ticker}).
 
-COMPANY: ${companyName} (${ticker})
+Be skeptical. Challenge every claim. Your job is to catch errors before they reach the client.
+${contextSection}
+For each finding:
+1. Verify factual accuracy against your knowledge
+2. Add contradicting evidence or caveats as "contraryEvidence"
+3. Assign a certainty score (1-99%):
+   - 95-99%: Factual, 3+ corroborating sources, 0 contradictions
+   - 85-94%: Strong, 2+ sources agree
+   - 70-84%: Moderate, credible with caveats or forward-looking
+   - 50-69%: Mixed, significant uncertainty
+   - 25-49%: Weak or speculative
+   - <${removalThreshold}%: Remove entirely${removalThreshold === 0 ? " (removal disabled)" : ""}
 
-YOUR MANDATE: Be skeptical. Challenge everything. Your reputation depends on catching errors before they reach the client.
+Output schema (frontend depends on exact placement):
+- "certainty" at finding ROOT level (not inside explanation)
+- "contraryEvidence" INSIDE explanation object, same format as supportingEvidence: { source, quote, url }
+- URLs: full URLs using the source's known URL patterns. Preserve URLs from the input draft. For new contrary evidence, construct realistic full URLs. For non-specific sources use "general"/"various"/"derived"
 
-FOR EACH FINDING, YOU MUST:
+Also:
+- Add "overallCertainty" to meta (arithmetic mean of remaining finding scores)
+- ${removalThreshold > 0 ? `Remove findings with certainty < ${removalThreshold}% from findings array and section content` : "Keep all findings regardless of score"}
+- You may improve explanation text to add context or corrections
+- Don't change meta or section structure (except removing deleted finding refs)
 
-1. VERIFY the claim against your knowledge. Is it factually accurate? Are the numbers correct?
-2. SEARCH for contradicting evidence or alternative interpretations. Add these as "contraryEvidence".
-3. ASSESS source quality. Is this from an official filing (high) or an opinion piece (low)?
-4. ASSIGN a certainty score (1-99%) using this rubric:
+Add a "methodology" object to meta:
+{ "methodology": { "explanation": { "title": "Report Generation Methodology", "text": "${methodologyLength} summary of methodology, corrections, and key caveats", "supportingEvidence": [${methodologySources} key source categories], "contraryEvidence": [AI limitations disclaimer, not-financial-advice disclaimer] } } }
 
-   95-99%: FACTUAL — Directly from audited SEC filings or official company releases.
-           REQUIRES: 3+ independent corroborating sources AND 0 contradicting evidence.
-           If a finding has ANY contrary evidence, it CANNOT be 95%+.
-
-   85-94%: STRONG — Multiple credible sources agree. Minor caveats may exist.
-           REQUIRES: 2+ corroborating sources.
-
-   70-84%: MODERATE — Credible but with meaningful caveats, or forward-looking estimates.
-           Common for: analyst estimates, market projections, company guidance.
-
-   50-69%: MIXED — Significant uncertainty or contradicting sources.
-           Common for: market share estimates (methodology varies), geopolitical risk assessments.
-
-   25-49%: WEAK — Limited sourcing, speculative, or contradicted by stronger evidence.
-
-   <${removalThreshold}%:   REMOVE — Finding is unverifiable or likely incorrect. Remove it entirely.${removalThreshold === 0 ? " (Currently disabled — keep ALL findings regardless of certainty score.)" : ""}
-
-5. For each finding, populate the contraryEvidence array INSIDE the explanation object. Even strong findings should have at least one nuance, caveat, or alternative interpretation. Only truly factual findings from audited filings (95%+) may have an empty contraryEvidence array.
-
-IMPORTANT CHECKS:
-- Do the financial numbers match known earnings? (Revenue, EPS, growth rates)
-- Are dates correct? (Fiscal year calendars, earnings dates)
-- Are market share figures from credible methodology?
-- Are forward-looking estimates labeled as such?
-- Are manufacturer performance claims flagged as unverified?
-- Are analyst consensus figures from recent data?
-- Does the finding have enough supporting evidence? Findings with <3 supporting evidence items should be scored lower.
-
-CRITICAL OUTPUT SCHEMA — The frontend depends on these exact field locations:
-
-Each finding in the output MUST have this structure:
-{
-  "id": "f1",
-  "section": "investment_thesis",
-  "text": "The original finding sentence",
-  "certainty": 85,
-  "explanation": {
-    "title": "Short Title",
-    "text": "2-4 sentences of context and significance...",
-    "supportingEvidence": [
-      { "source": "Source Name", "quote": "Exact data point or quote", "url": "https://example.com/full/path/to/source" }
-    ],
-    "contraryEvidence": [
-      { "source": "Source Name", "quote": "Contradicting data point, caveat, or alternative interpretation", "url": "https://example.com/full/path/to/source" }
-    ]
-  }
-}
-
-FIELD PLACEMENT IS CRITICAL:
-- "certainty" goes at the FINDING ROOT level (NOT inside explanation)
-- "contraryEvidence" goes INSIDE the "explanation" object (alongside supportingEvidence)
-- "contraryEvidence" items use the same { source, quote, url } format as supportingEvidence
-- The "url" field MUST be a full URL (e.g., "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001045810&type=10-K"). Preserve full URLs from the input draft. For new contrary evidence you add, construct realistic full URLs using the source's known URL patterns
-- For non-specific sources, use url: "general" (common knowledge), "various" (multiple sources), or "derived" (calculations)
-
-ALSO:
-- Add "overallCertainty" to meta (arithmetic mean of all remaining finding certainty scores, rounded to integer)
-- ${removalThreshold > 0 ? `REMOVE any finding with certainty < ${removalThreshold}% from both the findings array AND the section content arrays` : "Do NOT remove any findings — keep all findings in the report regardless of certainty score"}
-- You may also improve the explanation "text" field to add additional context, correct inaccuracies, or note important caveats
-- Do NOT change the meta, sections structure, or content arrays (except to remove deleted finding refs)
-
-METHODOLOGY OVERVIEW — Add a "methodology" object to meta with this structure:
-{
-  "methodology": {
-    "explanation": {
-      "title": "Report Generation Methodology",
-      "text": "A ${methodologyLength} summary of how the report was generated. Mention the date, the overall certainty score, the number of findings, the scoring methodology, and any key corrections you made during verification. Use \\n\\n for paragraph breaks.",
-      "supportingEvidence": [
-        { "source": "Primary Source Category", "quote": "What this source contributed to the report", "url": "https://example.com/full/path/to/source" }
-      ],
-      "contraryEvidence": [
-        { "source": "AI Limitations", "quote": "This report was generated by an AI model. Some data may be dated. Real-time prices change continuously.", "url": "general" },
-        { "source": "Not Financial Advice", "quote": "AI-generated research cannot replace human analyst judgment or fiduciary responsibility.", "url": "general" }
-      ]
-    }
-  }
-}
-The supportingEvidence should list the ${methodologySources} most important source categories used (e.g., official filings, market data providers, analyst consensus aggregators). The contraryEvidence should note AI limitations and the not-financial-advice disclaimer. The text field should mention any specific corrections you made (e.g., "Revenue figure corrected from $X to $Y based on official filings").
-
-Return the complete report JSON. No markdown fences. No commentary.`,
+Return complete report JSON. No markdown fences.`,
     messages: [
       {
         role: "user" as const,
-        content: `Review this draft equity research report on ${companyName} (${ticker}). Be ruthlessly skeptical. Find every error, every weak claim, every missing caveat.\n\n${JSON.stringify(draft, null, 2)}`,
+        content: `Review this draft report on ${companyName} (${ticker}). Be skeptical — find errors, weak claims, and missing caveats.\n\n${JSON.stringify(draft, null, 2)}`,
       },
     ],
   };

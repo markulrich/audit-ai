@@ -12,7 +12,7 @@
  */
 
 import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command, HeadBucketCommand } from "@aws-sdk/client-s3";
-import type { Report } from "../shared/types";
+import type { Report, ChatMessage } from "../shared/types";
 
 // ── S3 client ─────────────────────────────────────────────────────────────────
 
@@ -43,6 +43,7 @@ interface VersionSnapshot {
   version: number;
   publishedAt: string;
   report: Report;
+  messages?: ChatMessage[];
 }
 
 // ── Low-level helpers ───────────────────────────────────────────────────────────
@@ -74,7 +75,7 @@ async function getObject<T = unknown>(key: string): Promise<T | null> {
 
 // ── Slug generation ─────────────────────────────────────────────────────────────
 
-function generateSlug(meta: Report["meta"]): string {
+export function generateSlug(meta: Report["meta"]): string {
   const base = (meta?.ticker || meta?.title || "report")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -86,21 +87,36 @@ function generateSlug(meta: Report["meta"]): string {
   return `${base}-${suffix}`;
 }
 
+/** Generate a slug from a domain profile (used by classify endpoint before report exists). */
+export function generateSlugFromProfile(ticker: string, companyName: string): string {
+  return generateSlug({ ticker: ticker !== "N/A" ? ticker : undefined, title: companyName } as Report["meta"]);
+}
+
 // ── Public API ──────────────────────────────────────────────────────────────────
 
-export async function publishReport(
+export async function saveReport(
   report: Report,
-  existingSlug?: string
+  existingSlug?: string,
+  messages?: ChatMessage[],
 ): Promise<{ slug: string; version: number; url: string }> {
   let slug = existingSlug;
   let meta: SlugMeta | undefined;
 
   if (slug) {
     const existing = await getObject<SlugMeta>(`reports/${slug}/meta.json`);
-    if (!existing) {
-      throw new Error(`Report slug "${slug}" not found`);
+    if (existing) {
+      meta = existing;
+    } else {
+      // Slug was pre-generated (e.g. by classify endpoint) but not yet saved — create it
+      meta = {
+        slug,
+        title: report.meta?.title || "Untitled Report",
+        ticker: report.meta?.ticker || null,
+        currentVersion: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
     }
-    meta = existing;
   }
 
   if (!slug) {
@@ -117,12 +133,14 @@ export async function publishReport(
 
   const version = meta!.currentVersion + 1;
 
-  // Store the versioned snapshot
-  await putObject(`reports/${slug}/v${version}.json`, {
+  // Store the versioned snapshot (report + conversation)
+  const snapshot: VersionSnapshot = {
     version,
     publishedAt: new Date().toISOString(),
     report,
-  });
+    ...(messages && messages.length > 0 ? { messages } : {}),
+  };
+  await putObject(`reports/${slug}/v${version}.json`, snapshot);
 
   // Update meta pointer
   meta!.currentVersion = version;
@@ -134,10 +152,13 @@ export async function publishReport(
   return { slug, version, url: `/reports/${slug}` };
 }
 
+/** @deprecated Use saveReport instead */
+export const publishReport = saveReport;
+
 export async function getReport(
   slug: string,
   version?: number
-): Promise<{ slug: string; currentVersion: number; createdAt: string; version: number; publishedAt: string; report: Report } | null> {
+): Promise<{ slug: string; currentVersion: number; createdAt: string; version: number; publishedAt: string; report: Report; messages?: ChatMessage[] } | null> {
   const meta = await getObject<SlugMeta>(`reports/${slug}/meta.json`);
   if (!meta) return null;
 

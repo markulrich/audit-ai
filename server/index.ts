@@ -12,12 +12,14 @@ import type { Request, Response, NextFunction } from "express";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { runPipeline } from "./pipeline";
-import { publishReport, getReport, listReports } from "./storage";
+import { saveReport, getReport, listReports, generateSlugFromProfile } from "./storage";
 import { getHealthStatus } from "./health";
+import { classifyDomain } from "./agents/classifier";
+import { getReasoningConfig } from "./reasoning-levels";
 
 import "./anthropic-client";
 
-import type { PipelineError, SendFn, Report } from "../shared/types";
+import type { PipelineError, SendFn, Report, ChatMessage, DomainProfile, TraceData } from "../shared/types";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -105,6 +107,42 @@ app.get("/api/health", async (_req: Request, res: Response) => {
   }
 });
 
+// ── Classify endpoint: runs only the classifier and generates a slug ─────────
+
+app.post("/api/classify", rateLimit, async (req: Request, res: Response) => {
+  const { query, reasoningLevel } = req.body as { query: unknown; reasoningLevel?: string };
+
+  if (!query || typeof query !== "string" || query.trim().length < 3) {
+    return res.status(400).json({ error: "Query must be at least 3 characters" });
+  }
+  if ((query as string).length > MAX_QUERY_LENGTH) {
+    return res.status(400).json({ error: `Query too long (max ${MAX_QUERY_LENGTH} chars)` });
+  }
+
+  try {
+    const config = getReasoningConfig(reasoningLevel ?? "heavy");
+    const classifierResult = await classifyDomain(query.trim(), undefined, config);
+    const domainProfile = classifierResult.result;
+    const trace = classifierResult.trace;
+    const slug = generateSlugFromProfile(domainProfile.ticker, domainProfile.companyName);
+
+    res.json({ slug, domainProfile, trace });
+  } catch (thrown: unknown) {
+    const err = thrown as PipelineError;
+    console.error("Classify error:", err);
+
+    const message = err.keyMissing
+      ? "ANTHROPIC_API_KEY is not set."
+      : err.status === 401 || err.status === 403
+      ? `API key rejected (HTTP ${err.status}).`
+      : err.status === 429
+      ? "Rate limit hit. Please wait and try again."
+      : `Classification failed: ${err.message || "Unknown error"}`;
+
+    res.status(err.status && err.status >= 400 ? err.status : 500).json({ error: message });
+  }
+});
+
 // ── SSE endpoint: generate an explainable report ────────────────────────────
 
 app.post("/api/generate", rateLimit, async (req: Request, res: Response) => {
@@ -188,22 +226,136 @@ app.post("/api/generate", rateLimit, async (req: Request, res: Response) => {
   }
 });
 
-// ── Publish / retrieve reports ──────────────────────────────────────────────
+// ── SSE endpoint: chat-based report generation ──────────────────────────────
 
-app.post("/api/reports/publish", async (req: Request, res: Response) => {
-  const { report, slug } = req.body as { report: unknown; slug?: string };
+app.post("/api/chat", rateLimit, async (req: Request, res: Response) => {
+  const { query, conversationId, messageHistory, previousReport, reasoningLevel, domainProfile: reqDomainProfile, classifierTrace: reqClassifierTrace } = req.body as {
+    query: unknown;
+    conversationId?: string;
+    messageHistory?: Array<{ role: string; content: string }>;
+    previousReport?: Report | null;
+    reasoningLevel?: string;
+    domainProfile?: DomainProfile;
+    classifierTrace?: TraceData;
+  };
+
+  // Input validation
+  if (!query || typeof query !== "string" || query.trim().length < 3) {
+    return res.status(400).json({ error: "Query must be at least 3 characters" });
+  }
+  if ((query as string).length > MAX_QUERY_LENGTH) {
+    return res.status(400).json({ error: `Query too long (max ${MAX_QUERY_LENGTH} chars)` });
+  }
+
+  // Set up SSE
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+    "X-Content-Type-Options": "nosniff",
+  });
+
+  let aborted = false;
+  req.on("aborted", () => {
+    aborted = true;
+  });
+  res.on("close", () => {
+    if (!res.writableEnded) aborted = true;
+  });
+
+  const send: SendFn = (event: string, data: unknown): void => {
+    if (!aborted && !res.writableEnded) {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    }
+  };
+
+  const heartbeat = setInterval(() => {
+    if (!aborted && !res.writableEnded) {
+      res.write(": heartbeat\n\n");
+    }
+  }, 15_000);
+
+  try {
+    const conversationContext = {
+      conversationId: conversationId || "unknown",
+      previousReport: previousReport || null,
+      messageHistory: Array.isArray(messageHistory)
+        ? messageHistory.slice(-10)
+        : [],
+    };
+
+    const preClassified = reqDomainProfile ? { domainProfile: reqDomainProfile, trace: reqClassifierTrace || {} } : undefined;
+    await runPipeline(query.trim(), send, () => aborted, reasoningLevel, conversationContext, preClassified);
+    if (!aborted) send("done", { success: true });
+  } catch (thrown) {
+    const err = thrown as PipelineError;
+    console.error("Pipeline error:", err);
+    if (!aborted) {
+      const detail = {
+        message: err.message || "Unknown error",
+        stage: err.stage || "unknown",
+        status: err.status || null,
+        type: err.constructor?.name || "Error",
+        rawOutputPreview: err.rawOutput ? err.rawOutput.slice(0, 500) + (err.rawOutput.length > 500 ? "..." : "") : null,
+        stopReason: err.agentTrace?.response?.stop_reason || null,
+        tokenUsage: err.agentTrace?.response?.usage || null,
+        durationMs: err.agentTrace?.timing?.durationMs || null,
+      };
+
+      const safeMessage =
+        err.keyMissing
+          ? "ANTHROPIC_API_KEY is not set. Configure it on the server to enable report generation."
+          : err.status === 401 || err.status === 403
+          ? `ANTHROPIC_API_KEY was rejected by the API (HTTP ${err.status}). Check that it is valid.`
+          : err.status === 429
+          ? `Rate limit hit during ${err.stage || "pipeline"} stage. Please wait a minute and try again.`
+          : err.status && err.status >= 500
+          ? `Upstream API error (HTTP ${err.status}). Please try again shortly.`
+          : `Pipeline failed: ${err.message || "Unknown error"}`;
+
+      send("error", { message: safeMessage, detail });
+    }
+  } finally {
+    clearInterval(heartbeat);
+    if (!res.writableEnded) res.end();
+  }
+});
+
+// ── Save / retrieve reports ─────────────────────────────────────────────────
+
+app.post("/api/reports/save", async (req: Request, res: Response) => {
+  const { report, slug, messages } = req.body as { report: unknown; slug?: string; messages?: ChatMessage[] };
 
   if (!report || typeof report !== "object" || !("meta" in report) || !("sections" in report) || !Array.isArray((report as Record<string, unknown>).sections) || !Array.isArray((report as Record<string, unknown>).findings)) {
     return res.status(400).json({ error: "Invalid report payload" });
   }
 
   try {
-    const result = await publishReport(report as Report, slug || undefined);
+    const result = await saveReport(report as Report, slug || undefined, messages);
     res.json(result);
   } catch (thrown: unknown) {
     const err = thrown instanceof Error ? thrown : new Error(String(thrown));
-    console.error("Publish error:", err);
-    res.status(500).json({ error: err.message || "Failed to publish report" });
+    console.error("Save error:", err);
+    res.status(500).json({ error: err.message || "Failed to save report" });
+  }
+});
+
+// Keep old endpoint for backward compatibility
+app.post("/api/reports/publish", async (req: Request, res: Response) => {
+  const { report, slug, messages } = req.body as { report: unknown; slug?: string; messages?: ChatMessage[] };
+
+  if (!report || typeof report !== "object" || !("meta" in report) || !("sections" in report) || !Array.isArray((report as Record<string, unknown>).sections) || !Array.isArray((report as Record<string, unknown>).findings)) {
+    return res.status(400).json({ error: "Invalid report payload" });
+  }
+
+  try {
+    const result = await saveReport(report as Report, slug || undefined, messages);
+    res.json(result);
+  } catch (thrown: unknown) {
+    const err = thrown instanceof Error ? thrown : new Error(String(thrown));
+    console.error("Save error:", err);
+    res.status(500).json({ error: err.message || "Failed to save report" });
   }
 });
 
