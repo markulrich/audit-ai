@@ -1,18 +1,34 @@
-FROM node:22-slim
-
-RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+FROM node:22-slim AS builder
 
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
-RUN npm install --production=false
+RUN npm ci
 
 COPY . .
 
-# Capture build metadata from git before building
-RUN echo "{\"commitSha\":\"$(git rev-parse HEAD 2>/dev/null || echo unknown)\",\"commitTitle\":\"$(git log -1 --pretty=%s 2>/dev/null || echo unknown)\",\"buildTime\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > build-info.json
+# Accept build metadata as build args instead of requiring git in the image
+ARG COMMIT_SHA=unknown
+ARG COMMIT_TITLE=unknown
+RUN echo "{\"commitSha\":\"${COMMIT_SHA}\",\"commitTitle\":\"${COMMIT_TITLE}\",\"buildTime\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > build-info.json
 
 RUN npm run build
+
+# ── Production stage ──────────────────────────────────────────────────────────
+FROM node:22-slim
+
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+# tsx is needed at runtime (TypeScript server), install all deps then prune
+RUN npm ci --omit=dev && npm install tsx
+
+# Copy built frontend and server source from builder
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/build-info.json ./
+COPY --from=builder /app/server ./server
+COPY --from=builder /app/shared ./shared
+COPY --from=builder /app/tsconfig.json ./
 
 ENV NODE_ENV=production
 EXPOSE 3001

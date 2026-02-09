@@ -92,15 +92,7 @@ function genConversationId(): string {
 
 export type SaveState = "idle" | "saving" | "saved" | "error";
 
-// ── Colors (matches main's homepage) ────────────────────────────────────────
-
-const COLORS = {
-  bg: "#fafafa",
-  text: "#1a1a2e",
-  textMuted: "#8a8ca5",
-  orange: "#b45309",
-  border: "#e2e4ea",
-} as const;
+import { COLORS } from "./constants";
 
 // ── Main App ─────────────────────────────────────────────────────────────────
 

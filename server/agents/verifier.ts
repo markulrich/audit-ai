@@ -1,4 +1,5 @@
 import { tracedCreate, type CreateMessageParams } from "../anthropic-client";
+import { extractJsonObject, stripCodeFences } from "../json-utils";
 import type {
   DomainProfile,
   Report,
@@ -168,7 +169,7 @@ Return complete report JSON. No markdown fences.`,
     const firstBlock = response.content?.[0];
     const text = firstBlock?.type === "text" ? firstBlock.text : undefined;
     if (!text) throw new Error("Empty verifier response");
-    const cleaned = text.replace(/```json\n?|\n?```/g, "").trim();
+    const cleaned = stripCodeFences(text);
     const report: Report = JSON.parse(cleaned);
 
     // Ensure meta and overallCertainty exist
@@ -209,39 +210,9 @@ Return complete report JSON. No markdown fences.`,
     console.error("Verification agent parse error:", error.message);
     const rawFirstBlock = response.content?.[0];
     const rawText = rawFirstBlock?.type === "text" ? rawFirstBlock.text : "";
-    // Try to extract a valid JSON object from the response by finding
-    // balanced brace pairs and attempting to parse each one. This avoids
-    // the greedy regex pitfall of matching across unrelated braces.
-    let extracted: any = null;
-    for (let i = 0; i < rawText.length; i++) {
-      if (rawText[i] !== "{") continue;
-      // Find the matching closing brace using depth counting
-      let depth = 0;
-      let inString = false;
-      let escape = false;
-      for (let j = i; j < rawText.length; j++) {
-        const ch = rawText[j];
-        if (escape) { escape = false; continue; }
-        if (ch === "\\" && inString) { escape = true; continue; }
-        if (ch === '"') { inString = !inString; continue; }
-        if (inString) continue;
-        if (ch === "{") depth++;
-        if (ch === "}") {
-          depth--;
-          if (depth === 0) {
-            try {
-              const candidate = JSON.parse(rawText.slice(i, j + 1));
-              if (!extracted || candidate.findings) extracted = candidate;
-              if (candidate.findings) break;
-            } catch {
-              // Not valid JSON, try the next '{'
-            }
-            break;
-          }
-        }
-      }
-      if (extracted?.findings) break;
-    }
+    // Try to extract a valid JSON object from the response
+    const extractedJson = extractJsonObject(rawText);
+    const extracted = extractedJson ? JSON.parse(extractedJson) : null;
     if (extracted) {
       try {
         const report: Report = extracted;

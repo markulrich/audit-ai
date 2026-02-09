@@ -29,6 +29,9 @@ const MAX_QUERY_LENGTH = 5000;
 
 // ── Middleware ───────────────────────────────────────────────────────────────
 
+// Trust the first proxy (fly.io) so req.ip reflects the real client IP
+app.set("trust proxy", 1);
+
 app.use(express.json({ limit: "5mb" }));
 
 // Request logging
@@ -53,6 +56,10 @@ app.use((req, res, next) => {
 app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  if (process.env.NODE_ENV === "production") {
+    res.setHeader("Strict-Transport-Security", "max-age=63072000; includeSubDomains");
+  }
   next();
 });
 
@@ -143,20 +150,10 @@ app.post("/api/classify", rateLimit, async (req: Request, res: Response) => {
   }
 });
 
-// ── SSE endpoint: generate an explainable report ────────────────────────────
+// ── SSE helpers ─────────────────────────────────────────────────────────────
 
-app.post("/api/generate", rateLimit, async (req: Request, res: Response) => {
-  const { query, reasoningLevel } = req.body as { query: unknown; reasoningLevel?: string };
-
-  // Input validation
-  if (!query || typeof query !== "string" || query.trim().length < 3) {
-    return res.status(400).json({ error: "Query must be at least 3 characters" });
-  }
-  if (query.length > MAX_QUERY_LENGTH) {
-    return res.status(400).json({ error: `Query too long (max ${MAX_QUERY_LENGTH} chars)` });
-  }
-
-  // Set up SSE
+/** Set up an SSE connection with abort tracking and heartbeat. */
+function initSSE(req: Request, res: Response): { send: SendFn; isAborted: () => boolean; cleanup: () => void } {
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache, no-transform",
@@ -165,15 +162,9 @@ app.post("/api/generate", rateLimit, async (req: Request, res: Response) => {
     "X-Content-Type-Options": "nosniff",
   });
 
-  // Track true client disconnects so we can abort the pipeline.
-  // Do not rely on req.close for POST bodies; that can fire after request read.
   let aborted = false;
-  req.on("aborted", () => {
-    aborted = true;
-  });
-  res.on("close", () => {
-    if (!res.writableEnded) aborted = true;
-  });
+  req.on("aborted", () => { aborted = true; });
+  res.on("close", () => { if (!res.writableEnded) aborted = true; });
 
   const send: SendFn = (event: string, data: unknown): void => {
     if (!aborted && !res.writableEnded) {
@@ -181,48 +172,82 @@ app.post("/api/generate", rateLimit, async (req: Request, res: Response) => {
     }
   };
 
-  // Heartbeat to keep connection alive through proxies
   const heartbeat = setInterval(() => {
     if (!aborted && !res.writableEnded) {
       res.write(": heartbeat\n\n");
     }
   }, 15_000);
 
+  return {
+    send,
+    isAborted: () => aborted,
+    cleanup: () => {
+      clearInterval(heartbeat);
+      if (!res.writableEnded) res.end();
+    },
+  };
+}
+
+/** Format a pipeline error into a safe user-facing message with debug detail. */
+function formatPipelineError(err: PipelineError): { message: string; detail: object } {
+  const detail = {
+    message: err.message || "Unknown error",
+    stage: err.stage || "unknown",
+    status: err.status || null,
+    type: err.constructor?.name || "Error",
+    rawOutputPreview: err.rawOutput ? err.rawOutput.slice(0, 500) + (err.rawOutput.length > 500 ? "..." : "") : null,
+    stopReason: err.agentTrace?.response?.stop_reason || null,
+    tokenUsage: err.agentTrace?.response?.usage || null,
+    durationMs: err.agentTrace?.timing?.durationMs || null,
+  };
+
+  const message =
+    err.keyMissing
+      ? "ANTHROPIC_API_KEY is not set. Configure it on the server to enable report generation."
+      : err.status === 401 || err.status === 403
+      ? `ANTHROPIC_API_KEY was rejected by the API (HTTP ${err.status}). Check that it is valid.`
+      : err.status === 429
+      ? `Anthropic API rate limit hit during ${err.stage || "pipeline"} stage. Please wait a minute and try again.`
+      : err.status && err.status >= 500
+      ? `Upstream API error (HTTP ${err.status}). Please try again shortly.`
+      : `Pipeline failed: ${err.message || "Unknown error"}`;
+
+  return { message, detail };
+}
+
+/** Validate a query string from a request body. Returns an error message or null. */
+function validateQuery(query: unknown): string | null {
+  if (!query || typeof query !== "string" || query.trim().length < 3) {
+    return "Query must be at least 3 characters";
+  }
+  if ((query as string).length > MAX_QUERY_LENGTH) {
+    return `Query too long (max ${MAX_QUERY_LENGTH} chars)`;
+  }
+  return null;
+}
+
+// ── SSE endpoint: generate an explainable report ────────────────────────────
+
+app.post("/api/generate", rateLimit, async (req: Request, res: Response) => {
+  const { query, reasoningLevel } = req.body as { query: unknown; reasoningLevel?: string };
+
+  const queryError = validateQuery(query);
+  if (queryError) return res.status(400).json({ error: queryError });
+
+  const { send, isAborted, cleanup } = initSSE(req, res);
+
   try {
-    await runPipeline(query.trim(), send, () => aborted, reasoningLevel);
-    if (!aborted) send("done", { success: true });
+    await runPipeline((query as string).trim(), send, isAborted, reasoningLevel);
+    if (!isAborted()) send("done", { success: true });
   } catch (thrown) {
     const err = thrown as PipelineError;
     console.error("Pipeline error:", err);
-    if (!aborted) {
-      // Show detailed error info for debugging
-      const detail = {
-        message: err.message || "Unknown error",
-        stage: err.stage || "unknown",
-        status: err.status || null,
-        type: err.constructor?.name || "Error",
-        rawOutputPreview: err.rawOutput ? err.rawOutput.slice(0, 500) + (err.rawOutput.length > 500 ? "..." : "") : null,
-        stopReason: err.agentTrace?.response?.stop_reason || null,
-        tokenUsage: err.agentTrace?.response?.usage || null,
-        durationMs: err.agentTrace?.timing?.durationMs || null,
-      };
-
-      const safeMessage =
-        err.keyMissing
-          ? "ANTHROPIC_API_KEY is not set. Configure it on the server to enable report generation."
-          : err.status === 401 || err.status === 403
-          ? `ANTHROPIC_API_KEY was rejected by the API (HTTP ${err.status}). Check that it is valid.`
-          : err.status === 429
-          ? `Anthropic API rate limit hit during ${err.stage || "pipeline"} stage: ${err.message || "Too many requests"}. Please wait a minute and try again.`
-          : err.status && err.status >= 500
-          ? `Upstream API error (HTTP ${err.status}). Please try again shortly.`
-          : `Pipeline failed: ${err.message || "Unknown error"}`;
-
-      send("error", { message: safeMessage, detail });
+    if (!isAborted()) {
+      const { message, detail } = formatPipelineError(err);
+      send("error", { message, detail });
     }
   } finally {
-    clearInterval(heartbeat);
-    if (!res.writableEnded) res.end();
+    cleanup();
   }
 });
 
@@ -239,42 +264,10 @@ app.post("/api/chat", rateLimit, async (req: Request, res: Response) => {
     classifierTrace?: TraceData;
   };
 
-  // Input validation
-  if (!query || typeof query !== "string" || query.trim().length < 3) {
-    return res.status(400).json({ error: "Query must be at least 3 characters" });
-  }
-  if ((query as string).length > MAX_QUERY_LENGTH) {
-    return res.status(400).json({ error: `Query too long (max ${MAX_QUERY_LENGTH} chars)` });
-  }
+  const queryError = validateQuery(query);
+  if (queryError) return res.status(400).json({ error: queryError });
 
-  // Set up SSE
-  res.writeHead(200, {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache, no-transform",
-    Connection: "keep-alive",
-    "X-Accel-Buffering": "no",
-    "X-Content-Type-Options": "nosniff",
-  });
-
-  let aborted = false;
-  req.on("aborted", () => {
-    aborted = true;
-  });
-  res.on("close", () => {
-    if (!res.writableEnded) aborted = true;
-  });
-
-  const send: SendFn = (event: string, data: unknown): void => {
-    if (!aborted && !res.writableEnded) {
-      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-    }
-  };
-
-  const heartbeat = setInterval(() => {
-    if (!aborted && !res.writableEnded) {
-      res.write(": heartbeat\n\n");
-    }
-  }, 15_000);
+  const { send, isAborted, cleanup } = initSSE(req, res);
 
   try {
     const conversationContext = {
@@ -286,45 +279,23 @@ app.post("/api/chat", rateLimit, async (req: Request, res: Response) => {
     };
 
     const preClassified = reqDomainProfile ? { domainProfile: reqDomainProfile, trace: reqClassifierTrace || {} } : undefined;
-    await runPipeline(query.trim(), send, () => aborted, reasoningLevel, conversationContext, preClassified);
-    if (!aborted) send("done", { success: true });
+    await runPipeline((query as string).trim(), send, isAborted, reasoningLevel, conversationContext, preClassified);
+    if (!isAborted()) send("done", { success: true });
   } catch (thrown) {
     const err = thrown as PipelineError;
     console.error("Pipeline error:", err);
-    if (!aborted) {
-      const detail = {
-        message: err.message || "Unknown error",
-        stage: err.stage || "unknown",
-        status: err.status || null,
-        type: err.constructor?.name || "Error",
-        rawOutputPreview: err.rawOutput ? err.rawOutput.slice(0, 500) + (err.rawOutput.length > 500 ? "..." : "") : null,
-        stopReason: err.agentTrace?.response?.stop_reason || null,
-        tokenUsage: err.agentTrace?.response?.usage || null,
-        durationMs: err.agentTrace?.timing?.durationMs || null,
-      };
-
-      const safeMessage =
-        err.keyMissing
-          ? "ANTHROPIC_API_KEY is not set. Configure it on the server to enable report generation."
-          : err.status === 401 || err.status === 403
-          ? `ANTHROPIC_API_KEY was rejected by the API (HTTP ${err.status}). Check that it is valid.`
-          : err.status === 429
-          ? `Rate limit hit during ${err.stage || "pipeline"} stage. Please wait a minute and try again.`
-          : err.status && err.status >= 500
-          ? `Upstream API error (HTTP ${err.status}). Please try again shortly.`
-          : `Pipeline failed: ${err.message || "Unknown error"}`;
-
-      send("error", { message: safeMessage, detail });
+    if (!isAborted()) {
+      const { message, detail } = formatPipelineError(err);
+      send("error", { message, detail });
     }
   } finally {
-    clearInterval(heartbeat);
-    if (!res.writableEnded) res.end();
+    cleanup();
   }
 });
 
 // ── Save / retrieve reports ─────────────────────────────────────────────────
 
-app.post("/api/reports/save", async (req: Request, res: Response) => {
+app.post("/api/reports/save", rateLimit, async (req: Request, res: Response) => {
   const { report, slug, messages } = req.body as { report: unknown; slug?: string; messages?: ChatMessage[] };
 
   if (!report || typeof report !== "object" || !("meta" in report) || !("sections" in report) || !Array.isArray((report as Record<string, unknown>).sections) || !Array.isArray((report as Record<string, unknown>).findings)) {
@@ -341,22 +312,10 @@ app.post("/api/reports/save", async (req: Request, res: Response) => {
   }
 });
 
-// Keep old endpoint for backward compatibility
-app.post("/api/reports/publish", async (req: Request, res: Response) => {
-  const { report, slug, messages } = req.body as { report: unknown; slug?: string; messages?: ChatMessage[] };
-
-  if (!report || typeof report !== "object" || !("meta" in report) || !("sections" in report) || !Array.isArray((report as Record<string, unknown>).sections) || !Array.isArray((report as Record<string, unknown>).findings)) {
-    return res.status(400).json({ error: "Invalid report payload" });
-  }
-
-  try {
-    const result = await saveReport(report as Report, slug || undefined, messages);
-    res.json(result);
-  } catch (thrown: unknown) {
-    const err = thrown instanceof Error ? thrown : new Error(String(thrown));
-    console.error("Save error:", err);
-    res.status(500).json({ error: err.message || "Failed to save report" });
-  }
+// Legacy endpoint — redirects to /api/reports/save
+app.post("/api/reports/publish", rateLimit, (req: Request, res: Response, next: NextFunction) => {
+  req.url = "/api/reports/save";
+  next();
 });
 
 app.get("/api/reports", async (_req: Request, res: Response) => {

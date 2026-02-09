@@ -1,4 +1,5 @@
 import { tracedCreate } from "../anthropic-client";
+import { repairTruncatedJson, stripCodeFences } from "../json-utils";
 import type {
   DomainProfile,
   EvidenceItem,
@@ -154,7 +155,7 @@ Focus your evidence gathering on what the user is asking for. Build on the previ
 
   try {
     if (!responseText) throw new Error("Empty researcher response");
-    const cleaned = responseText.replace(/```json\n?|\n?```/g, "").trim();
+    const cleaned = stripCodeFences(responseText);
     const result: EvidenceItem[] = JSON.parse(cleaned);
     return { result, trace: { ...trace, parsedOutput: { evidenceCount: result.length } } as TraceData };
   } catch (e: unknown) {
@@ -167,7 +168,7 @@ Focus your evidence gathering on what the user is asking for. Build on the previ
     // regex extraction would only find incomplete sub-arrays.
     if (stopReason === "max_tokens" && rawText.length > 0) {
       console.warn("Research agent response was truncated at max_tokens, attempting repair");
-      const repaired = repairTruncatedJson(rawText.replace(/```json\n?|\n?```/g, "").trim());
+      const repaired = repairTruncatedJson(stripCodeFences(rawText));
       if (repaired) {
         try {
           const result: unknown = JSON.parse(repaired);
@@ -212,50 +213,3 @@ Focus your evidence gathering on what the user is asking for. Build on the previ
   }
 }
 
-/**
- * Attempt to repair truncated JSON by closing all open brackets and braces.
- * This handles the common case where the model hits max_tokens mid-output.
- */
-function repairTruncatedJson(text: string): string | null {
-  const candidates: string[] = [
-    text,
-    // Strip trailing incomplete string (unmatched quote at end)
-    text.replace(/,?\s*"[^"]*$/, ""),
-    // Strip trailing incomplete key-value pair
-    text.replace(/,?\s*"[^"]*"\s*:\s*"?[^"{}[\]]*$/, ""),
-    // Strip back to the last closing brace/bracket
-    text.replace(/[^}\]]*$/, ""),
-  ];
-
-  for (const candidate of candidates) {
-    if (!candidate || candidate.length < 2) continue;
-
-    const closers: string[] = [];
-    let inString = false;
-    let escape = false;
-
-    for (let i = 0; i < candidate.length; i++) {
-      const ch = candidate[i];
-      if (escape) { escape = false; continue; }
-      if (ch === "\\" && inString) { escape = true; continue; }
-      if (ch === '"') { inString = !inString; continue; }
-      if (inString) continue;
-      if (ch === "{") closers.push("}");
-      else if (ch === "[") closers.push("]");
-      else if (ch === "}" || ch === "]") closers.pop();
-    }
-
-    if (inString) continue;
-    if (closers.length === 0) continue;
-
-    const repaired = candidate + closers.reverse().join("");
-    try {
-      JSON.parse(repaired);
-      return repaired;
-    } catch {
-      // This cut point didn't produce valid JSON, try the next one
-    }
-  }
-
-  return null;
-}

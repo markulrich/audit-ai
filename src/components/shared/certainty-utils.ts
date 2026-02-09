@@ -1,16 +1,5 @@
-export const COLORS = {
-  bg: "#fafafa",
-  cardBg: "#ffffff",
-  text: "#1a1a2e",
-  textSecondary: "#555770",
-  textMuted: "#8a8ca5",
-  border: "#e2e4ea",
-  accent: "#1a1a2e",
-  green: "#15803d",
-  orange: "#b45309",
-  red: "#b91c1c",
-  panelBg: "#f7f7fa",
-} as const;
+import { COLORS } from "../../constants";
+export { COLORS };
 
 export function getCertaintyColor(c: number): string {
   if (c > 90) return COLORS.green;
