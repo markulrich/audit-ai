@@ -19,6 +19,7 @@ export const REASONING_LEVELS: Record<string, ReasoningConfig> = {
     researcherModel: undefined,
     synthesizerModel: undefined,
     verifierModel: undefined,
+    skipVerifier: true, // skip audit step entirely for speed
 
     // Researcher
     evidenceMinItems: 2,
@@ -30,10 +31,10 @@ export const REASONING_LEVELS: Record<string, ReasoningConfig> = {
     explanationLength: "1 sentence",
     keyStatsCount: 2,
 
-    // Verifier
+    // Verifier (unused when skipVerifier is true)
     methodologyLength: "1 sentence",
     methodologySources: "1",
-    removalThreshold: 0, // keep all findings regardless of certainty
+    removalThreshold: 0,
   },
 
   light: {

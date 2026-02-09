@@ -119,6 +119,7 @@ export interface ReasoningConfig {
   researcherModel?: string;
   synthesizerModel?: string;
   verifierModel?: string;
+  skipVerifier?: boolean;
   evidenceMinItems: number;
   totalFindings: string;
   findingsPerSection: string;

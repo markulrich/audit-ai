@@ -226,73 +226,112 @@ export async function runPipeline(
   });
 
   // ── Stage 4: Verify ─────────────────────────────────────────────────────────
-  send("progress", {
-    stage: "verifying",
-    message: `Adversarially verifying ${draft.findings?.length || 0} findings...`,
-    percent: 75,
-    detail: `Challenging every claim against known facts. Assigning certainty scores (25-99%), adding contrary evidence, removing unverifiable findings (<25%). Using ${config.verifierModel || ANTHROPIC_MODEL}.`,
-    substeps: [
-      { text: "Cross-checking financial numbers", status: "active" },
-      { text: "Validating dates and fiscal calendars", status: "active" },
-      { text: "Scoring source authority", status: "active" },
-      { text: "Finding contradictions and caveats", status: "active" },
-      { text: "Removing weak findings (<25% certainty)", status: "active" },
-    ],
-  });
 
   let report: Report;
-  let verifierTrace: TraceData;
-  try {
-    const verifierResult = await verify(query, domainProfile, draft, send, config);
-    report = verifierResult.result;
-    verifierTrace = verifierResult.trace;
-  } catch (err) {
-    throw tagError(err as PipelineError, "verifier");
-  }
-  if (isAborted()) return;
-
-  const findingsCount: number = report.findings?.length || 0;
-  const avgCertainty: number =
-    findingsCount > 0
-      ? Math.round(
-          report.findings.reduce((s: number, f) => s + (f.certainty || 0), 0) /
-            findingsCount
-        )
-      : 0;
-
-  const removedCount: number = (draft.findings?.length || 0) - findingsCount;
+  let verifierTrace: TraceData | undefined;
+  let findingsCount: number;
+  let avgCertainty: number;
+  let removedCount: number;
   const certaintyBuckets: CertaintyBuckets = { high: 0, moderate: 0, mixed: 0, weak: 0 };
-  (report.findings || []).forEach((f) => {
-    const c = f.certainty ?? 0;
-    if (c >= 90) certaintyBuckets.high++;
-    else if (c >= 70) certaintyBuckets.moderate++;
-    else if (c >= 50) certaintyBuckets.mixed++;
-    else certaintyBuckets.weak++;
-  });
 
-  send("progress", {
-    stage: "verified",
-    message: `Verified ${findingsCount} findings — avg certainty ${avgCertainty}%`,
-    percent: 95,
-    detail: `High (90%+): ${certaintyBuckets.high} | Moderate (70-89%): ${certaintyBuckets.moderate} | Mixed (50-69%): ${certaintyBuckets.mixed} | Weak (<50%): ${certaintyBuckets.weak}${removedCount > 0 ? ` | Removed: ${removedCount}` : ""}`,
-    stats: {
-      model: verifierTrace.request?.model || ANTHROPIC_MODEL,
-      durationMs: verifierTrace.timing?.durationMs,
-      inputTokens: verifierTrace.response?.usage?.input_tokens,
-      outputTokens: verifierTrace.response?.usage?.output_tokens,
-      findingsCount,
-      avgCertainty,
-      removedCount,
-      certaintyBuckets,
-    },
-  });
+  if (config.skipVerifier) {
+    // Skip audit step entirely — assign default certainty and pass draft through
+    report = draft;
+    const DEFAULT_CERTAINTY = 70;
+    report.findings = (report.findings || []).map((f) => ({
+      ...f,
+      certainty: DEFAULT_CERTAINTY,
+      explanation: {
+        ...f.explanation,
+        contraryEvidence: f.explanation?.contraryEvidence || [],
+      },
+    }));
+    findingsCount = report.findings.length;
+    avgCertainty = DEFAULT_CERTAINTY;
+    removedCount = 0;
+    report.findings.forEach(() => certaintyBuckets.moderate++);
 
-  send("trace", {
-    stage: "verifier",
-    agent: "Verifier",
-    trace: verifierTrace,
-    intermediateOutput: null, // final report sent separately
-  });
+    if (!report.meta) report.meta = {} as Report["meta"];
+    report.meta.overallCertainty = DEFAULT_CERTAINTY;
+
+    send("progress", {
+      stage: "verified",
+      message: `Skipped verification — ${findingsCount} findings kept (default ${DEFAULT_CERTAINTY}% certainty)`,
+      percent: 95,
+      detail: "Verification skipped in X-Light mode for speed",
+      stats: {
+        findingsCount,
+        avgCertainty,
+        removedCount: 0,
+        certaintyBuckets,
+      },
+    });
+  } else {
+    send("progress", {
+      stage: "verifying",
+      message: `Adversarially verifying ${draft.findings?.length || 0} findings...`,
+      percent: 75,
+      detail: `Challenging every claim against known facts. Assigning certainty scores (25-99%), adding contrary evidence, removing unverifiable findings (<25%). Using ${config.verifierModel || ANTHROPIC_MODEL}.`,
+      substeps: [
+        { text: "Cross-checking financial numbers", status: "active" },
+        { text: "Validating dates and fiscal calendars", status: "active" },
+        { text: "Scoring source authority", status: "active" },
+        { text: "Finding contradictions and caveats", status: "active" },
+        { text: "Removing weak findings (<25% certainty)", status: "active" },
+      ],
+    });
+
+    try {
+      const verifierResult = await verify(query, domainProfile, draft, send, config);
+      report = verifierResult.result;
+      verifierTrace = verifierResult.trace;
+    } catch (err) {
+      throw tagError(err as PipelineError, "verifier");
+    }
+    if (isAborted()) return;
+
+    findingsCount = report.findings?.length || 0;
+    avgCertainty =
+      findingsCount > 0
+        ? Math.round(
+            report.findings.reduce((s: number, f) => s + (f.certainty || 0), 0) /
+              findingsCount
+          )
+        : 0;
+
+    removedCount = (draft.findings?.length || 0) - findingsCount;
+    (report.findings || []).forEach((f) => {
+      const c = f.certainty ?? 0;
+      if (c >= 90) certaintyBuckets.high++;
+      else if (c >= 70) certaintyBuckets.moderate++;
+      else if (c >= 50) certaintyBuckets.mixed++;
+      else certaintyBuckets.weak++;
+    });
+
+    send("progress", {
+      stage: "verified",
+      message: `Verified ${findingsCount} findings — avg certainty ${avgCertainty}%`,
+      percent: 95,
+      detail: `High (90%+): ${certaintyBuckets.high} | Moderate (70-89%): ${certaintyBuckets.moderate} | Mixed (50-69%): ${certaintyBuckets.mixed} | Weak (<50%): ${certaintyBuckets.weak}${removedCount > 0 ? ` | Removed: ${removedCount}` : ""}`,
+      stats: {
+        model: verifierTrace!.request?.model || ANTHROPIC_MODEL,
+        durationMs: verifierTrace!.timing?.durationMs,
+        inputTokens: verifierTrace!.response?.usage?.input_tokens,
+        outputTokens: verifierTrace!.response?.usage?.output_tokens,
+        findingsCount,
+        avgCertainty,
+        removedCount,
+        certaintyBuckets,
+      },
+    });
+
+    send("trace", {
+      stage: "verifier",
+      agent: "Verifier",
+      trace: verifierTrace!,
+      intermediateOutput: null, // final report sent separately
+    });
+  }
 
   // ── Stage 5: Deliver ────────────────────────────────────────────────────────
   const pipelineDurationMs: number = Date.now() - pipelineStartTime;
@@ -305,7 +344,7 @@ export async function runPipeline(
     },
     intermediateOutput: {
       query,
-      totalStages: 4,
+      totalStages: config.skipVerifier ? 3 : 4,
       totalFindings: findingsCount,
       avgCertainty,
     },
