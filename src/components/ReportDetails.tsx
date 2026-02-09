@@ -306,7 +306,7 @@ function AgentTracePanel({ traceEvent }: AgentTracePanelProps) {
             <StatRow label="Query" value={summaryOutput.query ?? "N/A"} />
             <StatRow label="Total Stages" value={summaryOutput.totalStages ?? "N/A"} />
             <StatRow label="Total Findings" value={summaryOutput.totalFindings ?? "N/A"} />
-            <StatRow label="Avg Certainty" value={`${summaryOutput.avgCertainty ?? "N/A"}%`} />
+            <StatRow label="Avg Certainty" value={summaryOutput.avgCertainty != null && summaryOutput.avgCertainty > 0 ? `${summaryOutput.avgCertainty}%` : "N/A"} />
           </>
         )}
       </div>

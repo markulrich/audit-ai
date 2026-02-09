@@ -235,35 +235,27 @@ export async function runPipeline(
   const certaintyBuckets: CertaintyBuckets = { high: 0, moderate: 0, mixed: 0, weak: 0 };
 
   if (config.skipVerifier) {
-    // Skip audit step entirely — assign default certainty and pass draft through
+    // Skip audit step entirely — leave certainty undefined (unverified)
     report = draft;
-    const DEFAULT_CERTAINTY = 70;
     report.findings = (report.findings || []).map((f) => ({
       ...f,
-      certainty: DEFAULT_CERTAINTY,
       explanation: {
         ...f.explanation,
         contraryEvidence: f.explanation?.contraryEvidence || [],
       },
     }));
     findingsCount = report.findings.length;
-    avgCertainty = DEFAULT_CERTAINTY;
+    avgCertainty = 0;
     removedCount = 0;
-    report.findings.forEach(() => certaintyBuckets.moderate++);
-
-    if (!report.meta) report.meta = {} as Report["meta"];
-    report.meta.overallCertainty = DEFAULT_CERTAINTY;
 
     send("progress", {
       stage: "verified",
-      message: `Skipped verification — ${findingsCount} findings kept (default ${DEFAULT_CERTAINTY}% certainty)`,
+      message: `Skipped verification — ${findingsCount} findings kept (unverified)`,
       percent: 95,
       detail: "Verification skipped in X-Light mode for speed",
       stats: {
         findingsCount,
-        avgCertainty,
         removedCount: 0,
-        certaintyBuckets,
       },
     });
   } else {
