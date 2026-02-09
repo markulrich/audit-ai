@@ -1,12 +1,74 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { join, dirname } from "path";
-import { fileURLToPath } from "url";
-import { mkdir, rm, writeFile } from "fs/promises";
-import { publishReport, getReport, listReports } from "./storage";
+import { describe, it, expect, beforeEach, vi, type Mock } from "vitest";
 import type { Report } from "../shared/types";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = join(__dirname, "..", ".data");
+// In-memory S3 mock — keyed by "Bucket/Key"
+let store: Map<string, string>;
+
+vi.mock("@aws-sdk/client-s3", () => {
+  class PutObjectCommand {
+    input: { Bucket: string; Key: string; Body: string };
+    constructor(input: { Bucket: string; Key: string; Body: string }) {
+      this.input = input;
+    }
+  }
+  class GetObjectCommand {
+    input: { Bucket: string; Key: string };
+    constructor(input: { Bucket: string; Key: string }) {
+      this.input = input;
+    }
+  }
+  class ListObjectsV2Command {
+    input: { Bucket: string; Prefix: string; Delimiter: string; ContinuationToken?: string };
+    constructor(input: { Bucket: string; Prefix: string; Delimiter: string; ContinuationToken?: string }) {
+      this.input = input;
+    }
+  }
+  class S3Client {
+    async send(command: PutObjectCommand | GetObjectCommand | ListObjectsV2Command) {
+      if (command instanceof PutObjectCommand) {
+        const { Bucket, Key, Body } = command.input;
+        store.set(`${Bucket}/${Key}`, Body);
+        return {};
+      }
+      if (command instanceof GetObjectCommand) {
+        const { Bucket, Key } = command.input;
+        const data = store.get(`${Bucket}/${Key}`);
+        if (!data) {
+          const err = new Error("NoSuchKey") as Error & { name: string; $metadata: { httpStatusCode: number } };
+          err.name = "NoSuchKey";
+          err.$metadata = { httpStatusCode: 404 };
+          throw err;
+        }
+        return {
+          Body: {
+            transformToString: async () => data,
+          },
+        };
+      }
+      if (command instanceof ListObjectsV2Command) {
+        const { Bucket, Prefix, Delimiter } = command.input;
+        const prefixes = new Set<string>();
+        for (const key of store.keys()) {
+          const objectKey = key.replace(`${Bucket}/`, "");
+          if (!objectKey.startsWith(Prefix)) continue;
+          const rest = objectKey.slice(Prefix.length);
+          const delimIdx = rest.indexOf(Delimiter);
+          if (delimIdx >= 0) {
+            prefixes.add(Prefix + rest.slice(0, delimIdx + 1));
+          }
+        }
+        return {
+          CommonPrefixes: [...prefixes].map((p) => ({ Prefix: p })),
+          NextContinuationToken: undefined,
+        };
+      }
+      throw new Error("Unknown command");
+    }
+  }
+  return { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command };
+});
+
+import { publishReport, getReport, listReports } from "./storage";
 
 function makeReport(overrides?: Partial<Report["meta"]>): Report {
   return {
@@ -22,13 +84,8 @@ function makeReport(overrides?: Partial<Report["meta"]>): Report {
 }
 
 describe("storage", () => {
-  // Clean up test data before and after each test
-  beforeEach(async () => {
-    await rm(DATA_DIR, { recursive: true, force: true });
-  });
-
-  afterEach(async () => {
-    await rm(DATA_DIR, { recursive: true, force: true });
+  beforeEach(() => {
+    store = new Map();
   });
 
   describe("listReports", () => {
@@ -84,11 +141,9 @@ describe("storage", () => {
       expect(list[0].currentVersion).toBe(2);
     });
 
-    it("skips orphan directories without meta.json", async () => {
-      // Create an orphan slug directory with no meta.json
-      const orphanDir = join(DATA_DIR, "reports", "reports", "orphan-slug");
-      await mkdir(orphanDir, { recursive: true });
-      await writeFile(join(orphanDir, "stale.txt"), "not json");
+    it("skips prefixes without meta.json", async () => {
+      // Manually insert an orphan prefix with no meta.json
+      store.set("undefined/reports/orphan-slug/v1.json", JSON.stringify({ version: 1 }));
 
       // Also publish a real report
       const report = makeReport({ title: "Real Report", ticker: "REAL" });

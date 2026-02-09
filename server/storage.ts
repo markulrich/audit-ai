@@ -1,33 +1,34 @@
 /**
- * Report storage backed by Tigris (Fly.io S3-compatible object storage).
+ * Report storage backed by S3-compatible object storage (Tigris on Fly.io).
  *
  * Object key layout:
  *   reports/{slug}/meta.json   – slug metadata + current version pointer
  *   reports/{slug}/v{N}.json   – full report snapshot for version N
  *
- * When BUCKET_NAME / AWS_ENDPOINT_URL_S3 are not set (local dev),
- * falls back to the local filesystem under .data/reports/.
- *
+ * Requires BUCKET_NAME and AWS_ENDPOINT_URL_S3 environment variables.
  * On Fly.io, `fly storage create` automatically sets BUCKET_NAME,
  * AWS_ENDPOINT_URL_S3, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
  * and AWS_REGION as secrets on the app — no manual config needed.
  */
 
 import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
-import { readFile, writeFile, mkdir, readdir } from "fs/promises";
-import { join, dirname } from "path";
-import { fileURLToPath } from "url";
 import type { Report } from "../shared/types";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const LOCAL_DATA_DIR = join(__dirname, "..", ".data", "reports");
-
-// ── Detect storage backend ─────────────────────────────────────────────────────
+// ── S3 client ─────────────────────────────────────────────────────────────────
 
 const BUCKET = process.env.BUCKET_NAME;
 const S3_ENDPOINT = process.env.AWS_ENDPOINT_URL_S3;
 
-const useS3 = Boolean(BUCKET && S3_ENDPOINT);
+const s3 = new S3Client({
+  region: process.env.AWS_REGION || "auto",
+  endpoint: S3_ENDPOINT,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+  },
+});
+
+console.log(`[storage] Using S3 bucket: ${BUCKET} (endpoint: ${S3_ENDPOINT})`);
 
 interface SlugMeta {
   slug: string;
@@ -44,62 +45,30 @@ interface VersionSnapshot {
   report: Report;
 }
 
-let s3: S3Client | undefined;
-if (useS3) {
-  s3 = new S3Client({
-    region: process.env.AWS_REGION || "auto",
-    endpoint: S3_ENDPOINT,
-    credentials: {
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-    },
-  });
-  console.log(`[storage] Using Tigris bucket: ${BUCKET}`);
-} else {
-  console.log(`[storage] No BUCKET_NAME configured — using local filesystem (.data/reports/)`);
-}
-
 // ── Low-level helpers ───────────────────────────────────────────────────────────
 
 async function putObject(key: string, body: unknown): Promise<void> {
-  if (useS3) {
-    await s3!.send(
-      new PutObjectCommand({
-        Bucket: BUCKET,
-        Key: key,
-        Body: JSON.stringify(body),
-        ContentType: "application/json",
-      })
-    );
-  } else {
-    const filePath = join(LOCAL_DATA_DIR, key);
-    await mkdir(dirname(filePath), { recursive: true });
-    await writeFile(filePath, JSON.stringify(body, null, 2), "utf-8");
-  }
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: BUCKET,
+      Key: key,
+      Body: JSON.stringify(body),
+      ContentType: "application/json",
+    })
+  );
 }
 
 async function getObject<T = unknown>(key: string): Promise<T | null> {
-  if (useS3) {
-    try {
-      const resp = await s3!.send(
-        new GetObjectCommand({ Bucket: BUCKET, Key: key })
-      );
-      const text = await resp.Body!.transformToString("utf-8");
-      return JSON.parse(text) as T;
-    } catch (thrown: unknown) {
-      const err = thrown as { name?: string; $metadata?: { httpStatusCode?: number } };
-      if (err.name === "NoSuchKey" || err.$metadata?.httpStatusCode === 404) return null;
-      throw thrown;
-    }
-  } else {
-    try {
-      const filePath = join(LOCAL_DATA_DIR, key);
-      const text = await readFile(filePath, "utf-8");
-      return JSON.parse(text) as T;
-    } catch (thrown: unknown) {
-      if ((thrown as NodeJS.ErrnoException).code === "ENOENT") return null;
-      throw thrown;
-    }
+  try {
+    const resp = await s3.send(
+      new GetObjectCommand({ Bucket: BUCKET, Key: key })
+    );
+    const text = await resp.Body!.transformToString("utf-8");
+    return JSON.parse(text) as T;
+  } catch (thrown: unknown) {
+    const err = thrown as { name?: string; $metadata?: { httpStatusCode?: number } };
+    if (err.name === "NoSuchKey" || err.$metadata?.httpStatusCode === 404) return null;
+    throw thrown;
   }
 }
 
@@ -187,38 +156,23 @@ export async function getReport(
 export async function listReports(): Promise<SlugMeta[]> {
   const slugs: string[] = [];
 
-  if (useS3) {
-    let continuationToken: string | undefined;
-    do {
-      const resp = await s3!.send(
-        new ListObjectsV2Command({
-          Bucket: BUCKET,
-          Prefix: "reports/",
-          Delimiter: "/",
-          ContinuationToken: continuationToken,
-        })
-      );
-      for (const prefix of resp.CommonPrefixes || []) {
-        // prefix.Prefix is e.g. "reports/my-slug/"
-        const slug = prefix.Prefix?.replace(/^reports\//, "").replace(/\/$/, "");
-        if (slug) slugs.push(slug);
-      }
-      continuationToken = resp.NextContinuationToken;
-    } while (continuationToken);
-  } else {
-    // Keys like "reports/{slug}/meta.json" are stored under LOCAL_DATA_DIR,
-    // so slug directories live at LOCAL_DATA_DIR/reports/{slug}/
-    try {
-      const reportsDir = join(LOCAL_DATA_DIR, "reports");
-      const entries = await readdir(reportsDir, { withFileTypes: true });
-      for (const entry of entries) {
-        if (entry.isDirectory()) slugs.push(entry.name);
-      }
-    } catch (thrown: unknown) {
-      if ((thrown as NodeJS.ErrnoException).code === "ENOENT") return [];
-      throw thrown;
+  let continuationToken: string | undefined;
+  do {
+    const resp = await s3.send(
+      new ListObjectsV2Command({
+        Bucket: BUCKET,
+        Prefix: "reports/",
+        Delimiter: "/",
+        ContinuationToken: continuationToken,
+      })
+    );
+    for (const prefix of resp.CommonPrefixes || []) {
+      // prefix.Prefix is e.g. "reports/my-slug/"
+      const slug = prefix.Prefix?.replace(/^reports\//, "").replace(/\/$/, "");
+      if (slug) slugs.push(slug);
     }
-  }
+    continuationToken = resp.NextContinuationToken;
+  } while (continuationToken);
 
   const metas: SlugMeta[] = [];
   for (const slug of slugs) {
