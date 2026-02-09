@@ -12,7 +12,7 @@ import { COLORS, getCertaintyColor } from "./shared/certainty-utils";
 import { useIsMobile } from "./shared/useIsMobile";
 import CertaintyBadge from "./shared/CertaintyBadge";
 import ExplanationPanel from "./shared/ExplanationPanel";
-import ExportMenu, { type ExportFormat } from "./shared/ExportMenu";
+import ExportMenu from "./shared/ExportMenu";
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
 
@@ -96,6 +96,8 @@ const SECTION_TITLES: Record<string, string> = {
   the_ask: "The Ask",
 };
 
+const PITCH_DECK_SECTION_IDS = new Set(["title_slide", "problem", "solution", "market_opportunity", "business_model", "traction", "the_ask"]);
+
 // ─── Prop Interfaces ────────────────────────────────────────────────────────────
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -117,11 +119,6 @@ export default function Report({ data, traceData, onBack, slug, saveState, onRet
   const [showPanel, setShowPanel] = useState<boolean>(false); // for mobile panel toggle
   const [showDetails, setShowDetails] = useState<boolean>(false);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
-
-  const handleExport = useCallback((format: ExportFormat) => {
-    // TODO: implement actual PDF/PPTX generation
-    console.log(`Export requested: ${format}`);
-  }, []);
   const panelRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
 
@@ -196,8 +193,10 @@ export default function Report({ data, traceData, onBack, slug, saveState, onRet
   const keyStats: KeyStat[] = meta?.keyStats || [];
 
   // Detect domain from section IDs for domain-aware rendering
-  const PITCH_DECK_SECTIONS = new Set(["title_slide", "problem", "solution", "market_opportunity", "business_model", "traction", "the_ask"]);
-  const isPitchDeck = safeSections.some((s) => PITCH_DECK_SECTIONS.has(s.id)) || !!meta?.fundingAsk;
+  const isPitchDeck = useMemo(() =>
+    safeSections.some((s) => PITCH_DECK_SECTION_IDS.has(s.id)) || !!meta?.fundingAsk,
+    [safeSections, meta?.fundingAsk]
+  );
   const domainLabel = isPitchDeck ? "AI-Generated Pitch Deck Analysis" : "AI-Generated Equity Research";
 
   // Filter sections that have at least one valid finding, or are title_slide (which has text-only content)
@@ -302,7 +301,7 @@ export default function Report({ data, traceData, onBack, slug, saveState, onRet
                 View as Slides
               </button>
             )}
-            <ExportMenu defaultFormat="pdf" onExport={handleExport} theme="light" />
+            <ExportMenu defaultFormat="pdf" theme="light" />
             {/* Save status + copy link */}
             <span
               style={{

@@ -5,8 +5,8 @@ export type ExportFormat = "pdf" | "pptx";
 interface ExportMenuProps {
   /** Which format is shown as the primary/default option */
   defaultFormat: ExportFormat;
-  /** Called when user picks a format */
-  onExport: (format: ExportFormat) => void;
+  /** Called when user picks a format (optional — toast is shown regardless) */
+  onExport?: (format: ExportFormat) => void;
   /** Color scheme: "light" for Report, "dark" for SlideDeck */
   theme?: "light" | "dark";
 }
@@ -65,7 +65,7 @@ export default function ExportMenu({ defaultFormat, onExport, theme = "light" }:
   const handleExport = useCallback((format: ExportFormat) => {
     setOpen(false);
     setToast(`${FORMATS[format].label} is not yet implemented`);
-    onExport(format);
+    onExport?.(format);
   }, [onExport]);
 
   // Auto-dismiss toast after 3s
