@@ -13,6 +13,7 @@ vi.mock("./storage", () => ({
 import {
   createJob,
   getJob,
+  cancelStaleJobs,
   getJobBySlug,
   getLatestJobForSlug,
   startJob,
@@ -421,6 +422,46 @@ describe("job lifecycle integration", () => {
       expect(preserved).not.toBeNull();
 
       unsub();
+    });
+  });
+
+  describe("stale job auto-cancellation", () => {
+    it("auto-cancels jobs that exceed max runtime", async () => {
+      await startJob(jobId);
+
+      // Fake the createdAt to be 31 minutes ago
+      const job = await getJob(jobId);
+      (job as any).createdAt = new Date(Date.now() - 31 * 60 * 1000).toISOString();
+
+      const cancelled = cancelStaleJobs();
+      expect(cancelled).toBe(1);
+
+      const staleJob = await getJob(jobId);
+      expect(staleJob!.status).toBe("failed");
+      expect(staleJob!.error!.message).toContain("timed out");
+    });
+
+    it("does not cancel jobs within max runtime", async () => {
+      await startJob(jobId);
+
+      // Job was just created, so it's within the time limit
+      const cancelled = cancelStaleJobs();
+      expect(cancelled).toBe(0);
+
+      const freshJob = await getJob(jobId);
+      expect(freshJob!.status).toBe("running");
+    });
+
+    it("does not cancel completed or failed jobs", async () => {
+      await startJob(jobId);
+      await completeJob(jobId, { meta: { title: "Done" }, sections: [], findings: [] });
+
+      // Fake old createdAt
+      const job = await getJob(jobId);
+      (job as any).createdAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+
+      const cancelled = cancelStaleJobs();
+      expect(cancelled).toBe(0);
     });
   });
 

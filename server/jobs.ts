@@ -368,5 +368,35 @@ export function isJobCancelled(jobId: string): boolean {
   return job.status === "failed" && job.error?.message === "Job cancelled by user";
 }
 
-// Run cleanup every hour
+/** Auto-cancel stale jobs that have been running too long */
+const MAX_JOB_RUNTIME_MS = 30 * 60 * 1000; // 30 minutes
+
+export function cancelStaleJobs(): number {
+  let cancelled = 0;
+  const now = Date.now();
+
+  for (const [jobId, job] of jobs) {
+    if (
+      (job.status === "running" || job.status === "queued") &&
+      now - new Date(job.createdAt).getTime() > MAX_JOB_RUNTIME_MS
+    ) {
+      console.warn(`[jobs] Auto-cancelling stale job ${jobId} (running for ${Math.round((now - new Date(job.createdAt).getTime()) / 60000)}min)`);
+
+      job.status = "failed";
+      job.completedAt = new Date().toISOString();
+      job.error = { message: "Job timed out — exceeded maximum runtime of 30 minutes" };
+      job.updatedAt = new Date().toISOString();
+
+      broadcastJobEvent(jobId, "job_status", { status: "failed" });
+      broadcastJobEvent(jobId, "error", job.error);
+
+      cancelled++;
+    }
+  }
+
+  return cancelled;
+}
+
+// Run cleanup every hour and stale job check every 5 minutes
 setInterval(() => cleanupOldJobs(), 60 * 60 * 1000);
+setInterval(() => cancelStaleJobs(), 5 * 60 * 1000);

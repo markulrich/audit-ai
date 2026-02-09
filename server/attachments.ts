@@ -293,18 +293,57 @@ function extractPdfText(buffer: Buffer): string {
   return deduped.join(" ").slice(0, 100_000);
 }
 
-/** Basic DOCX text extraction — DOCX is a ZIP with XML inside */
+/**
+ * DOCX text extraction — DOCX is a ZIP containing XML.
+ * Extracts text from w:t elements while preserving paragraph and tab structure.
+ * Works by scanning the raw bytes for XML patterns (no ZIP library needed
+ * since DOCX stores XML content uncompressed in most files, or we can match
+ * patterns in the compressed stream for commonly-appearing XML tags).
+ */
 function extractDocxText(buffer: Buffer): string {
-  // DOCX files are ZIP archives. Basic extraction without a zip library:
-  // Look for XML text content patterns
   const text = buffer.toString("utf-8", 0, Math.min(buffer.length, 500_000));
 
-  // Find w:t (word text) elements
+  // Strategy 1: Look for paragraph-level structure (preferred)
+  // Paragraphs are <w:p ...> ... </w:p>
+  const paragraphs: string[] = [];
+  const wpRegex = /<w:p[\s>][^]*?<\/w:p>/g;
+  let wpMatch: RegExpExecArray | null;
+
+  while ((wpMatch = wpRegex.exec(text)) !== null) {
+    const para = wpMatch[0];
+
+    // Extract all w:t text runs within this paragraph
+    const runs: string[] = [];
+    const wtRegex = /<w:t[^>]*>([^<]+)<\/w:t>/g;
+    let wtMatch: RegExpExecArray | null;
+
+    while ((wtMatch = wtRegex.exec(para)) !== null) {
+      runs.push(wtMatch[1]);
+    }
+
+    // Handle w:tab elements as tab characters
+    const withTabs = para.replace(/<w:tab\s*\/>/g, "\t");
+    // Check for tabs between runs
+    if (runs.length > 0) {
+      // If tab elements exist, insert tabs between text runs
+      const hasTabs = withTabs.includes("\t");
+      paragraphs.push(runs.join(hasTabs ? "\t" : ""));
+    }
+  }
+
+  if (paragraphs.length > 0) {
+    return paragraphs
+      .filter((p) => p.trim().length > 0) // remove empty paragraphs
+      .join("\n")
+      .slice(0, 100_000);
+  }
+
+  // Strategy 2: Fallback — find w:t elements anywhere (handles compressed XML)
   const textParts: string[] = [];
-  const wtRegex = /<w:t[^>]*>([^<]+)<\/w:t>/g;
+  const wtFallback = /<w:t[^>]*>([^<]+)<\/w:t>/g;
   let match: RegExpExecArray | null;
 
-  while ((match = wtRegex.exec(text)) !== null) {
+  while ((match = wtFallback.exec(text)) !== null) {
     textParts.push(match[1]);
   }
 

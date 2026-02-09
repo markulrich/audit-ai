@@ -97,6 +97,36 @@ Return ONLY a JSON object:
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const plan = JSON.parse(jsonMatch[0]) as AgentPlan;
+
+      // Validate the plan structure
+      if (!plan.steps || !Array.isArray(plan.steps) || plan.steps.length === 0) {
+        console.warn("[orchestrator] LLM returned plan with no steps, using default");
+        return generateDefaultPlan(attachments, isFollowUp, isPreClassified);
+      }
+
+      // Validate each step has required fields
+      const VALID_SKILLS = new Set(["classify", "research", "analyze_attachment", "synthesize", "verify", "refine_section", "draft_answer"]);
+      const validSteps = plan.steps.filter((step) => {
+        if (!step.skill || !VALID_SKILLS.has(step.skill)) {
+          console.warn(`[orchestrator] Skipping invalid skill: ${step.skill}`);
+          return false;
+        }
+        return true;
+      });
+
+      if (validSteps.length === 0) {
+        console.warn("[orchestrator] No valid steps in LLM plan, using default");
+        return generateDefaultPlan(attachments, isFollowUp, isPreClassified);
+      }
+
+      // Ensure each step has all required fields
+      plan.steps = validSteps.map((step) => ({
+        skill: step.skill,
+        description: step.description || `Execute ${step.skill}`,
+        input: step.input || {},
+        status: "pending" as const,
+      }));
+
       return plan;
     }
   } catch (err) {
