@@ -29,7 +29,7 @@ const MAX_QUERY_LENGTH = 5000;
 
 // ── Middleware ───────────────────────────────────────────────────────────────
 
-app.use(express.json({ limit: "100kb" }));
+app.use(express.json({ limit: "5mb" }));
 
 // Request logging
 app.use((req, res, next) => {
