@@ -55,8 +55,16 @@ jobs:
 
       - name: Create app (if needed)
         run: |
-          flyctl apps list | grep -q "^doublyai " || \
-            flyctl apps create doublyai --org personal
+          flyctl apps list | grep -q "audit-ai" || \
+            flyctl apps create audit-ai --org personal
+
+      - name: Provision Tigris storage (if needed)
+        run: |
+          if flyctl storage list --app audit-ai 2>/dev/null | grep -q .; then
+            echo "Storage already provisioned, skipping."
+          else
+            flyctl storage create --app audit-ai --name audit-ai-reports
+          fi
 
       - name: Deploy to production
         run: flyctl deploy
