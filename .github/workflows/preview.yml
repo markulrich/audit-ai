@@ -10,7 +10,7 @@ concurrency:
 
 env:
   FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-  PREVIEW_APP: doublyai-pr-${{ github.event.pull_request.number }}
+  PREVIEW_APP: audit-ai-pr-${{ github.event.pull_request.number }}
 
 jobs:
   deploy-preview:
@@ -25,6 +25,10 @@ jobs:
           missing=""
           if [ -z "$FLY_API_TOKEN" ]; then missing="$missing FLY_API_TOKEN"; fi
           if [ -z "$ANTHROPIC_API_KEY" ]; then missing="$missing ANTHROPIC_API_KEY"; fi
+          if [ -z "$BUCKET_NAME" ]; then missing="$missing BUCKET_NAME"; fi
+          if [ -z "$AWS_ENDPOINT_URL_S3" ]; then missing="$missing AWS_ENDPOINT_URL_S3"; fi
+          if [ -z "$AWS_ACCESS_KEY_ID" ]; then missing="$missing AWS_ACCESS_KEY_ID"; fi
+          if [ -z "$AWS_SECRET_ACCESS_KEY" ]; then missing="$missing AWS_SECRET_ACCESS_KEY"; fi
           if [ -n "$missing" ]; then
             echo "::error::Missing required repo secrets:$missing"
             echo "Add them at: Settings → Secrets and variables → Actions"
@@ -32,6 +36,10 @@ jobs:
           fi
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          BUCKET_NAME: ${{ secrets.BUCKET_NAME }}
+          AWS_ENDPOINT_URL_S3: ${{ secrets.AWS_ENDPOINT_URL_S3 }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -44,22 +52,21 @@ jobs:
           flyctl apps list | grep -q "$PREVIEW_APP" || \
             flyctl apps create "$PREVIEW_APP" --org personal
 
-      - name: Provision Tigris storage (if needed)
+      - name: Set secrets (shared with production)
         run: |
-          # `fly storage create` automatically sets BUCKET_NAME, AWS_ENDPOINT_URL_S3,
-          # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_REGION on the app.
-          if flyctl storage list --app "$PREVIEW_APP" 2>/dev/null | grep -q .; then
-            echo "Storage already provisioned, skipping."
-          else
-            flyctl storage create --app "$PREVIEW_APP" --name "${PREVIEW_APP}-reports"
-          fi
-
-      - name: Set secrets on preview app
-        run: |
-          flyctl secrets set ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
+          flyctl secrets set \
+            ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
+            BUCKET_NAME="$BUCKET_NAME" \
+            AWS_ENDPOINT_URL_S3="$AWS_ENDPOINT_URL_S3" \
+            AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
+            AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
             --app "$PREVIEW_APP" --stage
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          BUCKET_NAME: ${{ secrets.BUCKET_NAME }}
+          AWS_ENDPOINT_URL_S3: ${{ secrets.AWS_ENDPOINT_URL_S3 }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
       - name: Deploy preview
         run: |
@@ -72,7 +79,7 @@ jobs:
         with:
           script: |
             const url = `https://${process.env.PREVIEW_APP}.fly.dev`;
-            const body = `🚀 **Preview deployed!**\n\n${url}\n\n_This preview will be destroyed when the PR is closed._`;
+            const body = `**Preview deployed!**\n\n${url}\n\n_This preview will be destroyed when the PR is closed._`;
 
             // Find existing bot comment
             const { data: comments } = await github.rest.issues.listComments({

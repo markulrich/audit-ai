@@ -41,11 +41,29 @@ jobs:
     steps:
       - name: Validate required secrets
         run: |
-          if [ -z "$FLY_API_TOKEN" ]; then
-            echo "::error::Missing required secret: FLY_API_TOKEN"
-            echo "Add it at: Settings → Secrets and variables → Actions"
+          missing=""
+          if [ -z "$FLY_API_TOKEN" ]; then missing="$missing FLY_API_TOKEN"; fi
+          if [ -z "$ANTHROPIC_API_KEY" ]; then missing="$missing ANTHROPIC_API_KEY"; fi
+          if [ -z "$BUCKET_NAME" ]; then missing="$missing BUCKET_NAME"; fi
+          if [ -z "$AWS_ENDPOINT_URL_S3" ]; then missing="$missing AWS_ENDPOINT_URL_S3"; fi
+          if [ -z "$AWS_ACCESS_KEY_ID" ]; then missing="$missing AWS_ACCESS_KEY_ID"; fi
+          if [ -z "$AWS_SECRET_ACCESS_KEY" ]; then missing="$missing AWS_SECRET_ACCESS_KEY"; fi
+          if [ -n "$missing" ]; then
+            echo "::error::Missing required repo secrets:$missing"
+            echo "Add them at: Settings → Secrets and variables → Actions"
+            echo ""
+            echo "If this is a first deploy, run locally:"
+            echo "  fly storage create --app audit-ai --name audit-ai-reports"
+            echo "  fly secrets list --app audit-ai"
+            echo "Then add the S3 values as GitHub repo secrets."
             exit 1
           fi
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          BUCKET_NAME: ${{ secrets.BUCKET_NAME }}
+          AWS_ENDPOINT_URL_S3: ${{ secrets.AWS_ENDPOINT_URL_S3 }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -65,6 +83,22 @@ jobs:
           else
             flyctl storage create --app audit-ai --name audit-ai-reports
           fi
+
+      - name: Set secrets
+        run: |
+          flyctl secrets set \
+            ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
+            BUCKET_NAME="$BUCKET_NAME" \
+            AWS_ENDPOINT_URL_S3="$AWS_ENDPOINT_URL_S3" \
+            AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
+            AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+            --app audit-ai --stage
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          BUCKET_NAME: ${{ secrets.BUCKET_NAME }}
+          AWS_ENDPOINT_URL_S3: ${{ secrets.AWS_ENDPOINT_URL_S3 }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
       - name: Deploy to production
         run: flyctl deploy
