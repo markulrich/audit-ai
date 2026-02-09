@@ -28,13 +28,14 @@ import {
   summarizeJob,
   listJobs,
   cleanupOldJobs,
+  _resetForTests,
 } from "./jobs";
 import { putJobState, getJobState } from "./storage";
 
 describe("jobs", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Clean up all jobs between tests by creating fresh jobs
+    _resetForTests();
   });
 
   describe("generateJobId", () => {

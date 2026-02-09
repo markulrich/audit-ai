@@ -38,13 +38,24 @@ const MAX_PROGRESS_EVENTS = 200;
 const MAX_TRACE_EVENTS = 50;
 /** Maximum reasoning entries in work log */
 const MAX_WORK_LOG_REASONING = 100;
+/** Maximum concurrent running/queued jobs */
+const MAX_CONCURRENT_JOBS = 10;
 
 /** Generate a unique job ID */
 export function generateJobId(): string {
   return `job-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-/** Create a new report job */
+/** Count active (queued or running) jobs */
+export function countActiveJobs(): number {
+  let count = 0;
+  for (const job of jobs.values()) {
+    if (job.status === "queued" || job.status === "running") count++;
+  }
+  return count;
+}
+
+/** Create a new report job (throws if concurrent limit is exceeded) */
 export function createJob(params: {
   slug: string;
   query: string;
@@ -52,6 +63,11 @@ export function createJob(params: {
   attachments?: Attachment[];
   conversationContext?: ConversationContext;
 }): ReportJob {
+  const activeCount = countActiveJobs();
+  if (activeCount >= MAX_CONCURRENT_JOBS) {
+    throw new Error(`Too many concurrent jobs (${activeCount}/${MAX_CONCURRENT_JOBS}). Please wait for existing jobs to complete.`);
+  }
+
   const jobId = generateJobId();
   const now = new Date().toISOString();
 
@@ -395,6 +411,15 @@ export function cancelStaleJobs(): number {
   }
 
   return cancelled;
+}
+
+/** Reset all in-memory state (for tests only) */
+export function _resetForTests(): void {
+  for (const emitter of jobEmitters.values()) {
+    emitter.removeAllListeners();
+  }
+  jobs.clear();
+  jobEmitters.clear();
 }
 
 // Run cleanup every hour and stale job check every 5 minutes

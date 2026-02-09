@@ -30,6 +30,8 @@ import {
   listJobs,
   summarizeJob,
   cleanupOldJobs,
+  countActiveJobs,
+  _resetForTests,
 } from "./jobs";
 import type { Report, Attachment, AgentWorkLog } from "../shared/types";
 
@@ -39,6 +41,7 @@ describe("job lifecycle integration", () => {
   let slug: string;
 
   beforeEach(() => {
+    _resetForTests(); // Clear all jobs between tests
     const job = createJob({
       slug: `test-slug-${Date.now()}`,
       query: "Analyze NVDA",
@@ -518,6 +521,132 @@ describe("job lifecycle integration", () => {
     it("broadcastJobEvent is no-op for unknown job", () => {
       // Should not throw
       broadcastJobEvent("nonexistent-job-id", "test", {});
+    });
+  });
+
+  describe("concurrent job limit", () => {
+    it("countActiveJobs returns correct count", () => {
+      // beforeEach creates 1 job (queued), so at least 1 active
+      const count = countActiveJobs();
+      expect(count).toBeGreaterThanOrEqual(1);
+    });
+
+    it("throws when concurrent limit is exceeded", async () => {
+      // Complete all existing jobs first, then create max+1
+      // First, complete the job from beforeEach
+      await completeJob(jobId, {
+        meta: { title: "T" } as Report["meta"],
+        sections: [],
+        findings: [],
+      });
+
+      // Create 10 jobs (the limit)
+      const jobIds: string[] = [];
+      for (let i = 0; i < 10; i++) {
+        const j = createJob({
+          slug: `limit-test-${i}`,
+          query: `Query ${i}`,
+          reasoningLevel: "x-light",
+        });
+        jobIds.push(j.jobId);
+      }
+
+      // The 11th should throw
+      expect(() =>
+        createJob({
+          slug: "limit-test-overflow",
+          query: "Query overflow",
+          reasoningLevel: "x-light",
+        })
+      ).toThrow(/Too many concurrent jobs/);
+
+      // Clean up — complete all created jobs
+      for (const id of jobIds) {
+        await completeJob(id, {
+          meta: { title: "T" } as Report["meta"],
+          sections: [],
+          findings: [],
+        });
+      }
+    });
+
+    it("allows new jobs once active ones complete", async () => {
+      // Complete the beforeEach job
+      await completeJob(jobId, {
+        meta: { title: "T" } as Report["meta"],
+        sections: [],
+        findings: [],
+      });
+
+      // Fill up to the limit
+      const jobIds: string[] = [];
+      for (let i = 0; i < 10; i++) {
+        const j = createJob({
+          slug: `fill-test-${i}`,
+          query: `Q ${i}`,
+          reasoningLevel: "x-light",
+        });
+        jobIds.push(j.jobId);
+      }
+
+      // Should fail
+      expect(() =>
+        createJob({ slug: "x", query: "Q", reasoningLevel: "x-light" })
+      ).toThrow(/Too many/);
+
+      // Complete one job
+      await completeJob(jobIds[0], {
+        meta: { title: "T" } as Report["meta"],
+        sections: [],
+        findings: [],
+      });
+
+      // Now should succeed
+      const newJob = createJob({ slug: "after-complete", query: "Q", reasoningLevel: "x-light" });
+      expect(newJob.jobId).toBeTruthy();
+
+      // Clean up
+      for (const id of [...jobIds.slice(1), newJob.jobId]) {
+        await completeJob(id, {
+          meta: { title: "T" } as Report["meta"],
+          sections: [],
+          findings: [],
+        });
+      }
+    });
+
+    it("failed jobs don't count toward the limit", async () => {
+      await completeJob(jobId, {
+        meta: { title: "T" } as Report["meta"],
+        sections: [],
+        findings: [],
+      });
+
+      const jobIds: string[] = [];
+      for (let i = 0; i < 10; i++) {
+        const j = createJob({
+          slug: `fail-test-${i}`,
+          query: `Q ${i}`,
+          reasoningLevel: "x-light",
+        });
+        jobIds.push(j.jobId);
+      }
+
+      // Fail one job
+      await failJob(jobIds[0], { message: "test error" });
+
+      // Should now have room for one more
+      const newJob = createJob({ slug: "after-fail", query: "Q", reasoningLevel: "x-light" });
+      expect(newJob.jobId).toBeTruthy();
+
+      // Clean up
+      for (const id of [...jobIds.slice(1), newJob.jobId]) {
+        await completeJob(id, {
+          meta: { title: "T" } as Report["meta"],
+          sections: [],
+          findings: [],
+        });
+      }
     });
   });
 });
