@@ -666,6 +666,23 @@ export default function Report({ data, traceData, onBack, publishedSlug }: Repor
         <div style={{ maxWidth: 780, margin: "0 auto", padding: isMobile ? "20px 16px 60px" : "32px 40px 60px" }}>
           {/* Top buttons */}
           <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+            {publishedSlug && (
+              <button
+                onClick={onBack}
+                style={{
+                  padding: "4px 12px",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  border: `1px solid ${COLORS.border}`,
+                  borderRadius: 4,
+                  background: COLORS.cardBg,
+                  cursor: "pointer",
+                  color: COLORS.text,
+                }}
+              >
+                ← Back
+              </button>
+            )}
             {traceData && traceData.length > 0 && (
               <button
                 onClick={() => setShowDetails(true)}
