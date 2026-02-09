@@ -209,6 +209,7 @@ function MiniCodeBlock({ content, maxHeight }: MiniCodeBlockProps) {
 function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent, isActive, isDone, isPending, isFailed, errorMessage, errorDetail }: StageCardProps) {
   const [expanded, setExpanded] = useState<boolean>(false);
   const [drillTab, setDrillTab] = useState<string>("overview");
+  const [detailsOpen, setDetailsOpen] = useState<boolean>(false);
   const elapsedSec = useElapsed(isActive || isFailed, isFailed);
   const data: ProgressEvent | undefined = doneData || activeData;
   const stats: ProgressStats | undefined = data?.stats;
@@ -501,21 +502,49 @@ function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent
             </div>
           )}
 
-          {/* Stats summary */}
-          {stats && (
-            <div style={{ marginBottom: 10 }}>
-              <div
+          {/* Stats and Details — collapsible */}
+          {(stats || activeTrace) && (
+            <div>
+              <button
+                onClick={(e: React.MouseEvent<HTMLButtonElement>) => { e.stopPropagation(); setDetailsOpen(!detailsOpen); }}
                 style={{
-                  fontSize: 9,
-                  fontWeight: 700,
-                  textTransform: "uppercase",
-                  letterSpacing: 0.8,
-                  color: COLORS.textMuted,
-                  marginBottom: 4,
+                  width: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "6px 0",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  fontFamily: "inherit",
                 }}
               >
-                Stats
-              </div>
+                <span
+                  style={{
+                    fontSize: 9,
+                    fontWeight: 700,
+                    textTransform: "uppercase",
+                    letterSpacing: 0.8,
+                    color: COLORS.textMuted,
+                  }}
+                >
+                  Stats and Details
+                </span>
+                <span
+                  style={{
+                    fontSize: 8,
+                    color: COLORS.textMuted,
+                    transform: detailsOpen ? "rotate(90deg)" : "rotate(0deg)",
+                    transition: "transform 0.15s",
+                  }}
+                >
+                  &#9654;
+                </span>
+              </button>
+              {detailsOpen && (
+                <>
+          {stats && (
+            <div style={{ marginBottom: 10 }}>
               <div
                 style={{
                   display: "grid",
@@ -756,6 +785,10 @@ function StageCard({ config, activeData, doneData, traceEvent, pendingTraceEvent
               )}
               {drillTab === "error" && errorDetail && (
                 <MiniCodeBlock content={errorDetail} maxHeight={400} />
+              )}
+            </div>
+          )}
+                </>
               )}
             </div>
           )}
