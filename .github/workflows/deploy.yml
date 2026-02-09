@@ -11,7 +11,6 @@ concurrency:
 env:
   FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
   FLY_APP: audit-ai
-  TIGRIS_BUCKET: audit-ai-reports
 
 jobs:
   test:
@@ -44,8 +43,10 @@ jobs:
       - name: Validate required secrets
         run: |
           missing=""
-          if [ -z "$FLY_API_TOKEN" ]; then missing="$missing FLY_API_TOKEN"; fi
-          if [ -z "$ANTHROPIC_API_KEY" ]; then missing="$missing ANTHROPIC_API_KEY"; fi
+          for var in FLY_API_TOKEN ANTHROPIC_API_KEY BUCKET_NAME AWS_ENDPOINT_URL_S3 AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
+            eval "val=\$$var"
+            if [ -z "$val" ]; then missing="$missing $var"; fi
+          done
           if [ -n "$missing" ]; then
             echo "::error::Missing required repo secrets:$missing"
             echo "Add them at: Settings → Secrets and variables → Actions"
@@ -53,6 +54,10 @@ jobs:
           fi
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          BUCKET_NAME: ${{ secrets.BUCKET_NAME }}
+          AWS_ENDPOINT_URL_S3: ${{ secrets.AWS_ENDPOINT_URL_S3 }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -65,64 +70,21 @@ jobs:
           flyctl apps list | grep -q "$FLY_APP" || \
             flyctl apps create "$FLY_APP" --org personal
 
-      - name: Provision Tigris storage (if needed)
+      - name: Set app secrets
         run: |
-          # fly storage create auto-sets BUCKET_NAME, AWS_ENDPOINT_URL_S3,
-          # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY on the app.
-          if flyctl storage list --app "$FLY_APP" 2>/dev/null | grep -q .; then
-            echo "Storage already provisioned, skipping."
-          else
-            flyctl storage create --app "$FLY_APP" --name "$TIGRIS_BUCKET"
-          fi
-
-      - name: Ensure S3/Tigris env vars are set
-        run: |
-          check_s3_vars() {
-            local secrets
-            secrets=$(flyctl secrets list --app "$FLY_APP" --json)
-            local missing=""
-            for var in BUCKET_NAME AWS_ENDPOINT_URL_S3 AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
-              if ! echo "$secrets" | jq -e ".[] | select(.Name == \"$var\")" > /dev/null 2>&1; then
-                missing="$missing $var"
-              fi
-            done
-            echo "$missing"
-          }
-
-          # Resolve the actual Tigris AddOn name (may differ from bucket name)
-          resolve_addon_name() {
-            local app="$1"
-            flyctl storage list --app "$app" --json 2>/dev/null | jq -r '.[0].Name // empty' 2>/dev/null
-          }
-
-          missing=$(check_s3_vars)
-          if [ -n "$missing" ]; then
-            echo "::warning::Missing Tigris S3 env vars:$missing — re-attaching storage bucket..."
-            addon_name=$(resolve_addon_name "$FLY_APP")
-            if [ -n "$addon_name" ]; then
-              flyctl storage update "$addon_name" --app "$FLY_APP"
-            else
-              echo "No existing storage AddOn found — creating new one..."
-              flyctl storage create --app "$FLY_APP" --name "$TIGRIS_BUCKET"
-            fi
-
-            missing=$(check_s3_vars)
-            if [ -n "$missing" ]; then
-              echo "::error::Still missing after re-attach:$missing"
-              echo "Set them manually: fly secrets set BUCKET_NAME=... AWS_ENDPOINT_URL_S3=... AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... --app $FLY_APP"
-              exit 1
-            fi
-            echo "Env vars restored after re-attaching storage."
-          else
-            echo "All required S3 env vars are set."
-          fi
-
-      - name: Set Anthropic key
-        run: |
-          flyctl secrets set ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
+          flyctl secrets set \
+            ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
+            BUCKET_NAME="$BUCKET_NAME" \
+            AWS_ENDPOINT_URL_S3="$AWS_ENDPOINT_URL_S3" \
+            AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
+            AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
             --app "$FLY_APP" --stage
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          BUCKET_NAME: ${{ secrets.BUCKET_NAME }}
+          AWS_ENDPOINT_URL_S3: ${{ secrets.AWS_ENDPOINT_URL_S3 }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 
       - name: Deploy to production
         run: flyctl deploy --app "$FLY_APP"
