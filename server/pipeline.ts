@@ -1,4 +1,5 @@
 import { classifyDomain } from "./agents/classifier";
+import { draftAnswer } from "./agents/draft-answer";
 import { research } from "./agents/researcher";
 import { synthesize } from "./agents/synthesizer";
 import { verify } from "./agents/verifier";
@@ -140,7 +141,48 @@ export async function runPipeline(
   const isPitch = domainProfile.domain === "pitch_deck";
   const isSlides = domainProfile.outputFormat === "slide_deck";
 
-  // ── Stage 2: Research ───────────────────────────────────────────────────────
+  // ── Stage 2: Draft Answer ──────────────────────────────────────────────────
+  send("progress", {
+    stage: "drafting_answer",
+    message: `Generating quick draft answer for ${domainProfile.companyName}...`,
+    percent: 12,
+    detail: `Fast Haiku call to produce an immediate draft answer while the full pipeline runs`,
+  });
+
+  let draftAnswerText: string = "";
+  let draftAnswerTrace: TraceData;
+  try {
+    const draftResult = await draftAnswer(query, domainProfile, send);
+    draftAnswerText = draftResult.result;
+    draftAnswerTrace = draftResult.trace;
+  } catch (err) {
+    // Draft answer is non-critical — log and continue
+    draftAnswerTrace = {};
+    console.warn("Draft answer failed (non-critical):", (err as Error).message);
+  }
+  if (isAborted()) return;
+
+  send("progress", {
+    stage: "answer_drafted",
+    message: "Draft answer ready",
+    percent: 14,
+    draftAnswer: draftAnswerText,
+    stats: {
+      model: draftAnswerTrace?.request?.model || "claude-haiku-4-5",
+      durationMs: draftAnswerTrace?.timing?.durationMs,
+      inputTokens: draftAnswerTrace?.response?.usage?.input_tokens,
+      outputTokens: draftAnswerTrace?.response?.usage?.output_tokens,
+    },
+  });
+
+  send("trace", {
+    stage: "draft_answer",
+    agent: "DraftAnswer",
+    trace: draftAnswerTrace || {},
+    intermediateOutput: draftAnswerText,
+  });
+
+  // ── Stage 3: Research ───────────────────────────────────────────────────────
   const researchSubsteps = isPitch
     ? [
         { text: "Market research and TAM/SAM/SOM", status: "active" },
@@ -158,6 +200,7 @@ export async function runPipeline(
         { text: "Industry trends and macro factors", status: "active" },
         { text: "Risk factors (regulatory, geopolitical)", status: "active" },
       ];
+
 
   send("progress", {
     stage: "researching",
@@ -371,7 +414,7 @@ export async function runPipeline(
     },
     intermediateOutput: {
       query,
-      totalStages: 4,
+      totalStages: 5,
       totalFindings: findingsCount,
       avgCertainty,
     },

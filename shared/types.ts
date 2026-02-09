@@ -237,6 +237,7 @@ export interface ProgressEvent {
   substeps?: ProgressSubstep[];
   stats?: ProgressStats;
   evidencePreview?: EvidencePreviewItem[];
+  draftAnswer?: string;
 }
 
 // ── Error Types ─────────────────────────────────────────────────────────────

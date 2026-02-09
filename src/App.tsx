@@ -119,6 +119,7 @@ export default function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [liveProgress, setLiveProgress] = useState<ProgressEvent[]>([]);
   const [liveError, setLiveError] = useState<ErrorInfo | null>(null);
+  const [draftAnswer, setDraftAnswer] = useState<string | null>(null);
   const [reasoningLevel, setReasoningLevel] = useState<string>("x-light");
   const [reportVersion, setReportVersion] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
@@ -217,6 +218,7 @@ export default function App() {
     setIsGenerating(false);
     setLiveProgress([]);
     setLiveError(null);
+    setDraftAnswer(null);
     setReportVersion(0);
     setSlug(null);
     setSaveState("idle");
@@ -271,6 +273,7 @@ export default function App() {
     setLiveProgress([]);
     setLiveError(null);
     setCurrentTraceData([]);
+    setDraftAnswer(null);
 
     const newVersion = reportVersion + 1;
 
@@ -329,6 +332,9 @@ export default function App() {
           const evt = payload as ProgressEvent;
           collectedProgress = [...collectedProgress, evt];
           setLiveProgress((prev) => [...prev, evt]);
+          if (evt.draftAnswer) {
+            setDraftAnswer(evt.draftAnswer);
+          }
           return;
         }
 
@@ -355,6 +361,7 @@ export default function App() {
           receivedReport = true;
           finalReport = payload as Report;
           setCurrentReport(finalReport);
+          setDraftAnswer(null);
           setReportVersion(newVersion);
           return;
         }
@@ -711,41 +718,108 @@ export default function App() {
             />
           )
         ) : (
-          /* Empty state — waiting for report */
+          /* Empty state — waiting for report, or showing draft answer */
           <div style={{
             flex: 1,
             display: "flex",
             flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
+            alignItems: draftAnswer ? "flex-start" : "center",
+            justifyContent: draftAnswer ? "flex-start" : "center",
             color: "#8a8ca5",
             fontFamily: "'Inter', 'Helvetica Neue', system-ui, sans-serif",
+            overflow: "auto",
           }}>
-            <div style={{ fontSize: 48, fontWeight: 800, letterSpacing: -2, color: "#1a1a2e", marginBottom: 8 }}>
-              Doubly<span style={{ color: "#b45309" }}>AI</span>
-            </div>
-            <p style={{ fontSize: 14, fontWeight: 500, maxWidth: 400, textAlign: "center", lineHeight: 1.6 }}>
-              {isGenerating
-                ? "Generating your research report..."
-                : "Start a conversation to generate an interactive research report."}
-            </p>
-            {isGenerating && (
+            {draftAnswer ? (
               <div style={{
-                marginTop: 24,
-                width: 200,
-                height: 2,
-                background: "#e2e4ea",
-                borderRadius: 1,
-                overflow: "hidden",
+                width: "100%",
+                maxWidth: 720,
+                margin: "0 auto",
+                padding: "48px 40px",
               }}>
                 <div style={{
-                  height: "100%",
-                  width: `${liveProgress.length > 0 ? liveProgress[liveProgress.length - 1].percent : 5}%`,
-                  background: "linear-gradient(90deg, #6366f1, #0891b2, #059669, #d97706)",
-                  backgroundSize: "400% 100%",
-                  transition: "width 0.5s ease",
-                }} />
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  marginBottom: 20,
+                }}>
+                  <span style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    textTransform: "uppercase",
+                    letterSpacing: 1,
+                    color: "#8b5cf6",
+                  }}>
+                    Draft Answer
+                  </span>
+                  {isGenerating && (
+                    <span style={{
+                      fontSize: 10,
+                      fontWeight: 500,
+                      color: "#8a8ca5",
+                      fontStyle: "italic",
+                    }}>
+                      — full report in progress...
+                    </span>
+                  )}
+                </div>
+                <div style={{
+                  fontSize: 15,
+                  lineHeight: 1.8,
+                  color: "#1a1a2e",
+                  fontWeight: 400,
+                  whiteSpace: "pre-wrap",
+                }}>
+                  {draftAnswer}
+                </div>
+                {isGenerating && (
+                  <div style={{
+                    marginTop: 32,
+                    width: "100%",
+                    maxWidth: 400,
+                    height: 2,
+                    background: "#e2e4ea",
+                    borderRadius: 1,
+                    overflow: "hidden",
+                  }}>
+                    <div style={{
+                      height: "100%",
+                      width: `${liveProgress.length > 0 ? liveProgress[liveProgress.length - 1].percent : 5}%`,
+                      background: "linear-gradient(90deg, #6366f1, #8b5cf6, #0891b2, #059669, #d97706)",
+                      backgroundSize: "500% 100%",
+                      transition: "width 0.5s ease",
+                    }} />
+                  </div>
+                )}
               </div>
+            ) : (
+              <>
+                <div style={{ fontSize: 48, fontWeight: 800, letterSpacing: -2, color: "#1a1a2e", marginBottom: 8 }}>
+                  Doubly<span style={{ color: "#b45309" }}>AI</span>
+                </div>
+                <p style={{ fontSize: 14, fontWeight: 500, maxWidth: 400, textAlign: "center", lineHeight: 1.6 }}>
+                  {isGenerating
+                    ? "Generating your research report..."
+                    : "Start a conversation to generate an interactive research report."}
+                </p>
+                {isGenerating && (
+                  <div style={{
+                    marginTop: 24,
+                    width: 200,
+                    height: 2,
+                    background: "#e2e4ea",
+                    borderRadius: 1,
+                    overflow: "hidden",
+                  }}>
+                    <div style={{
+                      height: "100%",
+                      width: `${liveProgress.length > 0 ? liveProgress[liveProgress.length - 1].percent : 5}%`,
+                      background: "linear-gradient(90deg, #6366f1, #0891b2, #059669, #d97706)",
+                      backgroundSize: "400% 100%",
+                      transition: "width 0.5s ease",
+                    }} />
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
