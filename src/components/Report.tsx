@@ -95,14 +95,16 @@ interface ReportProps {
   onBack: () => void;
   slug?: string | null;
   saveState?: SaveState;
+  onRetrySave?: () => void;
 }
 
 // ─── Main Report Component ─────────────────────────────────────────────────────
 
-export default function Report({ data, traceData, onBack, slug, saveState }: ReportProps) {
+export default function Report({ data, traceData, onBack, slug, saveState, onRetrySave }: ReportProps) {
   const [activeId, setActiveId] = useState<string>("overview");
   const [showPanel, setShowPanel] = useState<boolean>(false); // for mobile panel toggle
   const [showDetails, setShowDetails] = useState<boolean>(false);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const panelRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
 
@@ -279,26 +281,57 @@ export default function Report({ data, traceData, onBack, slug, saveState }: Rep
                   <button
                     onClick={() => {
                       const fullUrl = window.location.origin + `/reports/${slug}`;
-                      navigator.clipboard.writeText(fullUrl).catch(() => {});
+                      navigator.clipboard.writeText(fullUrl).then(
+                        () => {
+                          setCopyState("copied");
+                          setTimeout(() => setCopyState("idle"), 2000);
+                        },
+                        () => {
+                          setCopyState("failed");
+                          setTimeout(() => setCopyState("idle"), 2000);
+                        }
+                      );
                     }}
                     aria-label="Copy report link"
                     style={{
-                      border: `1px solid ${COLORS.green}40`,
-                      background: "#fff",
+                      border: `1px solid ${copyState === "failed" ? COLORS.red + "40" : COLORS.green + "40"}`,
+                      background: copyState === "copied" ? COLORS.green + "0a" : "#fff",
                       borderRadius: 3,
                       padding: "1px 8px",
                       fontSize: 11,
                       fontWeight: 600,
-                      color: COLORS.green,
-                      cursor: "pointer",
+                      color: copyState === "failed" ? COLORS.red : COLORS.green,
+                      cursor: copyState !== "idle" ? "default" : "pointer",
+                      transition: "all 0.15s",
                     }}
+                    disabled={copyState !== "idle"}
                   >
-                    Copy Link
+                    {copyState === "copied" ? "Link Copied \u2713" : copyState === "failed" ? "Copy Failed" : "Copy Link"}
                   </button>
                 </>
               )}
               {saveState === "error" && (
-                <span style={{ color: COLORS.red }}>Save failed</span>
+                <>
+                  <span style={{ color: COLORS.red }}>Save failed</span>
+                  {onRetrySave && (
+                    <button
+                      onClick={onRetrySave}
+                      aria-label="Retry saving report"
+                      style={{
+                        border: `1px solid ${COLORS.red}40`,
+                        background: "#fff",
+                        borderRadius: 3,
+                        padding: "1px 8px",
+                        fontSize: 11,
+                        fontWeight: 600,
+                        color: COLORS.red,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Try Again
+                    </button>
+                  )}
+                </>
               )}
             </span>
           </div>

@@ -124,14 +124,16 @@ interface SlideDeckProps {
   onBack: () => void;
   slug?: string | null;
   saveState?: SaveState;
+  onRetrySave?: () => void;
 }
 
 // ─── Main SlideDeck Component ──────────────────────────────────────────────────
 
-export default function SlideDeck({ data, traceData, onBack, slug, saveState }: SlideDeckProps) {
+export default function SlideDeck({ data, traceData, onBack, slug, saveState, onRetrySave }: SlideDeckProps) {
   const [currentSlide, setCurrentSlide] = useState(0);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [showPanel, setShowPanel] = useState<boolean>(false);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const isMobile = useIsMobile();
 
   const { meta, sections, findings } = data;
@@ -358,7 +360,69 @@ export default function SlideDeck({ data, traceData, onBack, slug, saveState }: 
             <span style={{ fontSize: 11, color: DK.textDim }}>
               {currentSlide + 1} / {safeSections.length}
             </span>
-            {saveState === "saved" && <span style={{ fontSize: 11, color: DK.green }}>Saved</span>}
+            {saveState === "saving" && (
+              <span style={{ fontSize: 11, color: DK.textDim }}>Autosaving...</span>
+            )}
+            {saveState === "saved" && (
+              <>
+                <span style={{ fontSize: 11, color: DK.green }}>Saved</span>
+                {slug && (
+                  <button
+                    onClick={() => {
+                      const fullUrl = window.location.origin + `/reports/${slug}`;
+                      navigator.clipboard.writeText(fullUrl).then(
+                        () => {
+                          setCopyState("copied");
+                          setTimeout(() => setCopyState("idle"), 2000);
+                        },
+                        () => {
+                          setCopyState("failed");
+                          setTimeout(() => setCopyState("idle"), 2000);
+                        }
+                      );
+                    }}
+                    aria-label="Copy report link"
+                    style={{
+                      border: `1px solid ${copyState === "failed" ? DK.red + "40" : DK.green + "40"}`,
+                      background: copyState === "copied" ? DK.green + "12" : "transparent",
+                      borderRadius: 3,
+                      padding: "1px 8px",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: copyState === "failed" ? DK.red : DK.green,
+                      cursor: copyState !== "idle" ? "default" : "pointer",
+                      transition: "all 0.15s",
+                    }}
+                    disabled={copyState !== "idle"}
+                  >
+                    {copyState === "copied" ? "Link Copied \u2713" : copyState === "failed" ? "Copy Failed" : "Copy Link"}
+                  </button>
+                )}
+              </>
+            )}
+            {saveState === "error" && (
+              <>
+                <span style={{ fontSize: 11, color: DK.red }}>Save failed</span>
+                {onRetrySave && (
+                  <button
+                    onClick={onRetrySave}
+                    aria-label="Retry saving report"
+                    style={{
+                      border: `1px solid ${DK.red}40`,
+                      background: "transparent",
+                      borderRadius: 3,
+                      padding: "1px 8px",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: DK.red,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Try Again
+                  </button>
+                )}
+              </>
+            )}
           </div>
         </div>
 
