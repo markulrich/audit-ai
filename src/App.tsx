@@ -6,9 +6,13 @@ import type {
   ErrorInfo,
   ErrorDetail,
   ChatMessage,
+  DomainProfile,
+  TraceData,
 } from "../shared/types";
+import QueryInput from "./components/QueryInput";
 import ChatPanel from "./components/ChatPanel";
 import ReportView from "./components/Report";
+import ProgressStream from "./components/ProgressStream";
 import ReportsPage from "./components/ReportsPage";
 import HealthPage from "./components/HealthPage";
 
@@ -87,6 +91,16 @@ function genConversationId(): string {
 
 export type SaveState = "idle" | "saving" | "saved" | "error";
 
+// ── Colors (matches main's homepage) ────────────────────────────────────────
+
+const COLORS = {
+  bg: "#fafafa",
+  text: "#1a1a2e",
+  textMuted: "#8a8ca5",
+  orange: "#b45309",
+  border: "#e2e4ea",
+} as const;
+
 // ── Main App ─────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -115,6 +129,14 @@ export default function App() {
   const [isLoadingSlug, setIsLoadingSlug] = useState<boolean>(!!getSlugFromPath());
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  // ── Classify state (homepage → classify → navigate) ────────────────────────
+  const [isClassifying, setIsClassifying] = useState(false);
+  const [classifyError, setClassifyError] = useState<string | null>(null);
+  const classifiedRef = useRef<{ domainProfile: DomainProfile; trace: TraceData } | null>(null);
+
+  // Whether we're on the homepage (no slug, no messages, not loading)
+  const isHomepage = !slug && messages.length === 0 && !isLoadingSlug && !loadError && utilityRoute === null;
+
   // ── Load saved report+conversation when visiting /reports/:slug ──────────
   useEffect(() => {
     const initialSlug = getSlugFromPath();
@@ -138,6 +160,13 @@ export default function App() {
         setIsLoadingSlug(false);
       })
       .catch((err: Error) => {
+        // If report not found, it might be a new classify-generated slug
+        // In that case, just show the report page in empty state
+        if (err.message === "Report not found") {
+          setSlug(initialSlug);
+          setIsLoadingSlug(false);
+          return;
+        }
         setLoadError(err.message || "Failed to load report");
         setIsLoadingSlug(false);
       });
@@ -162,8 +191,8 @@ export default function App() {
       const result = await res.json() as { slug: string; version: number; url: string };
       setSaveState("saved");
 
-      // If this is the first save, navigate to the report URL
-      if (!currentSlug) {
+      // If slug changed (shouldn't happen often), update it
+      if (!currentSlug || currentSlug !== result.slug) {
         setSlug(result.slug);
         window.history.pushState(null, "", result.url);
       }
@@ -192,6 +221,9 @@ export default function App() {
     setSlug(null);
     setSaveState("idle");
     setLoadError(null);
+    setIsClassifying(false);
+    setClassifyError(null);
+    classifiedRef.current = null;
     window.history.pushState(null, "", "/");
   }, []);
 
@@ -218,7 +250,8 @@ export default function App() {
     setLiveError(null);
   }, [liveProgress]);
 
-  const handleSend = useCallback(async (userMessage: string) => {
+  // ── Start the full pipeline (research → synthesize → verify) ──────────────
+  const startPipeline = useCallback(async (userMessage: string, pipelineSlug: string) => {
     // Abort any in-flight request
     if (abortRef.current) abortRef.current.abort();
     const controller = new AbortController();
@@ -254,6 +287,9 @@ export default function App() {
         .concat(userMsg)
         .map((m) => ({ role: m.role, content: m.content }));
 
+      // Pass pre-classified data if available (first query from homepage)
+      const preClassified = classifiedRef.current;
+
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -263,9 +299,16 @@ export default function App() {
           messageHistory,
           previousReport: currentReport,
           reasoningLevel,
+          ...(preClassified ? {
+            domainProfile: preClassified.domainProfile,
+            classifierTrace: preClassified.trace,
+          } : {}),
         }),
         signal: controller.signal,
       });
+
+      // Clear pre-classified data after first use
+      classifiedRef.current = null;
 
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -382,7 +425,7 @@ export default function App() {
         setMessages(allMessages);
 
         // Auto-save report + conversation
-        autoSave(finalReport, allMessages, slug);
+        autoSave(finalReport, allMessages, pipelineSlug);
       } else if (receivedError) {
         setMessages((prev) => [
           ...prev,
@@ -437,7 +480,48 @@ export default function App() {
         },
       ]);
     }
-  }, [conversationId, messages, currentReport, reasoningLevel, reportVersion, slug, autoSave]);
+  }, [conversationId, messages, currentReport, reasoningLevel, reportVersion, autoSave]);
+
+  // ── Handle query submission from homepage (classify → navigate → pipeline) ─
+  const handleHomepageSubmit = useCallback(async (query: string) => {
+    setIsClassifying(true);
+    setClassifyError(null);
+
+    try {
+      const res = await fetch("/api/classify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, reasoningLevel }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `Classification failed: ${res.status}`);
+      }
+
+      const result = await res.json() as { slug: string; domainProfile: DomainProfile; trace: TraceData };
+
+      // Store classified data for the pipeline to skip re-classification
+      classifiedRef.current = { domainProfile: result.domainProfile, trace: result.trace };
+
+      // Set slug and navigate to report page
+      setSlug(result.slug);
+      window.history.pushState(null, "", `/reports/${result.slug}`);
+      setIsClassifying(false);
+
+      // Start the full pipeline (will skip classifier since preClassified is set)
+      startPipeline(query, result.slug);
+    } catch (rawErr: unknown) {
+      const err = rawErr instanceof Error ? rawErr : new Error(String(rawErr));
+      setIsClassifying(false);
+      setClassifyError(err.message || "Classification failed");
+    }
+  }, [reasoningLevel, startPipeline]);
+
+  // ── Handle send from ChatPanel (follow-up queries on report page) ─────────
+  const handleSend = useCallback(async (userMessage: string) => {
+    await startPipeline(userMessage, slug!);
+  }, [startPipeline, slug]);
 
   // ── Utility routes ────────────────────────────────────────────────────────
 
@@ -502,7 +586,77 @@ export default function App() {
     );
   }
 
-  // ── Main split-pane layout ──────────────────────────────────────────────────
+  // ── Homepage: centered layout matching main ────────────────────────────────
+
+  if (isHomepage) {
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "60px 24px",
+          background: COLORS.bg,
+          fontFamily: "'Inter', 'Helvetica Neue', system-ui, sans-serif",
+        }}
+      >
+        <h1
+          style={{
+            fontSize: 48,
+            fontWeight: 800,
+            letterSpacing: -2,
+            color: COLORS.text,
+            marginBottom: 4,
+          }}
+        >
+          Doubly<span style={{ color: COLORS.orange }}>AI</span>
+        </h1>
+        <p
+          style={{
+            fontSize: 14,
+            color: COLORS.textMuted,
+            fontWeight: 500,
+            marginBottom: 32,
+            textAlign: "center",
+            maxWidth: 500,
+            lineHeight: 1.6,
+          }}
+        >
+          Explainable research — every claim backed by evidence, scored for certainty.
+        </p>
+        <QueryInput
+          onSubmit={handleHomepageSubmit}
+          disabled={isClassifying}
+          reasoningLevel={reasoningLevel}
+          onReasoningLevelChange={setReasoningLevel}
+        />
+        {classifyError && (
+          <div
+            style={{
+              marginTop: 16,
+              padding: "8px 16px",
+              background: "#b91c1c08",
+              border: "1px solid #b91c1c20",
+              borderRadius: 4,
+              fontSize: 13,
+              color: "#b91c1c",
+              maxWidth: 500,
+              textAlign: "center",
+            }}
+          >
+            {classifyError}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── Report page: 3-column layout (Chat | Progress/Report | Explanation) ───
+
+  // Show ProgressStream when generating and no report yet (first query)
+  const showFullProgress = isGenerating && !currentReport;
 
   return (
     <div style={{
@@ -533,13 +687,43 @@ export default function App() {
         />
       </div>
 
-      {/* Right: Report panel (or empty state) */}
+      {/* Center + Right: Report area */}
       <div style={{
         flex: 1,
         overflow: "hidden",
         display: "flex",
       }}>
-        {currentReport ? (
+        {showFullProgress ? (
+          /* During first generation, show full ProgressStream */
+          <div style={{
+            flex: 1,
+            overflow: "auto",
+            padding: "32px 40px",
+            fontFamily: "'Inter', 'Helvetica Neue', system-ui, sans-serif",
+          }}>
+            <div style={{ maxWidth: 800, margin: "0 auto" }}>
+              <div style={{ marginBottom: 24 }}>
+                <h1 style={{
+                  fontSize: 28,
+                  fontWeight: 800,
+                  letterSpacing: -1,
+                  color: COLORS.text,
+                  margin: "0 0 4px",
+                }}>
+                  Doubly<span style={{ color: COLORS.orange }}>AI</span>
+                </h1>
+                <p style={{ fontSize: 13, color: COLORS.textMuted, margin: 0 }}>
+                  Generating your research report...
+                </p>
+              </div>
+              <ProgressStream
+                steps={liveProgress}
+                traceData={currentTraceData}
+                error={liveError}
+              />
+            </div>
+          </div>
+        ) : currentReport ? (
           <ReportView
             data={currentReport}
             traceData={currentTraceData}
@@ -548,6 +732,7 @@ export default function App() {
             saveState={saveState}
           />
         ) : (
+          /* Empty state — slug exists but no report yet and not generating */
           <div style={{
             flex: 1,
             display: "flex",
@@ -561,28 +746,8 @@ export default function App() {
               Doubly<span style={{ color: "#b45309" }}>AI</span>
             </div>
             <p style={{ fontSize: 14, fontWeight: 500, maxWidth: 400, textAlign: "center", lineHeight: 1.6 }}>
-              {isGenerating
-                ? "Generating your research report..."
-                : "Start a conversation to generate an interactive research report. Ask follow-up questions to refine it."}
+              Start a conversation to generate an interactive research report.
             </p>
-            {isGenerating && (
-              <div style={{
-                marginTop: 24,
-                width: 200,
-                height: 2,
-                background: "#e2e4ea",
-                borderRadius: 1,
-                overflow: "hidden",
-              }}>
-                <div style={{
-                  height: "100%",
-                  width: `${liveProgress.length > 0 ? liveProgress[liveProgress.length - 1].percent : 5}%`,
-                  background: "linear-gradient(90deg, #6366f1, #0891b2, #059669, #d97706)",
-                  backgroundSize: "400% 100%",
-                  transition: "width 0.5s ease",
-                }} />
-              </div>
-            )}
           </div>
         )}
       </div>

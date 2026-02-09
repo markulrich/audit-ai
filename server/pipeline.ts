@@ -34,7 +34,8 @@ export async function runPipeline(
   send: SendFn,
   isAborted: () => boolean = () => false,
   reasoningLevel?: string,
-  conversationContext?: ConversationContext
+  conversationContext?: ConversationContext,
+  preClassified?: { domainProfile: DomainProfile; trace: TraceData }
 ): Promise<void> {
   const pipelineStartTime: number = Date.now();
   const config: ReasoningConfig = getReasoningConfig(reasoningLevel ?? "heavy");
@@ -63,49 +64,77 @@ export async function runPipeline(
   }
 
   // ── Stage 1: Classify ───────────────────────────────────────────────────────
-  send("progress", {
-    stage: "classifying",
-    message: "Analyzing your query...",
-    percent: 5,
-    detail: `Sending query to ${ANTHROPIC_MODEL} to identify domain, ticker, and focus areas`,
-    substeps: [
-      { text: "Extracting company name and ticker symbol", status: "active" },
-      { text: "Identifying research domain", status: "pending" },
-      { text: "Determining focus areas", status: "pending" },
-    ],
-  });
-
   let domainProfile: DomainProfile;
   let classifierTrace: TraceData;
-  try {
-    const classifierResult = await classifyDomain(query, send, config, conversationContext);
-    domainProfile = classifierResult.result;
-    classifierTrace = classifierResult.trace;
-  } catch (err) {
-    throw tagError(err as PipelineError, "classifier");
+
+  if (preClassified) {
+    // Classifier was already run (e.g. from /api/classify endpoint)
+    domainProfile = preClassified.domainProfile;
+    classifierTrace = preClassified.trace;
+
+    send("progress", {
+      stage: "classified",
+      message: `Identified ${domainProfile.companyName} (${domainProfile.ticker})`,
+      percent: 10,
+      domainProfile,
+      detail: `Domain: ${domainProfile.domainLabel} | Ticker: ${domainProfile.ticker} | Focus: ${domainProfile.focusAreas.join(", ") || "general"} (pre-classified)`,
+      stats: {
+        model: classifierTrace.request?.model || ANTHROPIC_MODEL,
+        durationMs: classifierTrace.timing?.durationMs,
+        inputTokens: classifierTrace.response?.usage?.input_tokens,
+        outputTokens: classifierTrace.response?.usage?.output_tokens,
+      },
+    });
+
+    send("trace", {
+      stage: "classifier",
+      agent: "Classifier",
+      trace: classifierTrace,
+      intermediateOutput: domainProfile,
+    });
+  } else {
+    send("progress", {
+      stage: "classifying",
+      message: "Analyzing your query...",
+      percent: 5,
+      detail: `Sending query to ${ANTHROPIC_MODEL} to identify domain, ticker, and focus areas`,
+      substeps: [
+        { text: "Extracting company name and ticker symbol", status: "active" },
+        { text: "Identifying research domain", status: "pending" },
+        { text: "Determining focus areas", status: "pending" },
+      ],
+    });
+
+    try {
+      const classifierResult = await classifyDomain(query, send, config, conversationContext);
+      domainProfile = classifierResult.result;
+      classifierTrace = classifierResult.trace;
+    } catch (err) {
+      throw tagError(err as PipelineError, "classifier");
+    }
+    if (isAborted()) return;
+
+    send("progress", {
+      stage: "classified",
+      message: `Identified ${domainProfile.companyName} (${domainProfile.ticker})`,
+      percent: 10,
+      domainProfile,
+      detail: `Domain: ${domainProfile.domainLabel} | Ticker: ${domainProfile.ticker} | Focus: ${domainProfile.focusAreas.join(", ") || "general"}`,
+      stats: {
+        model: classifierTrace.request?.model || ANTHROPIC_MODEL,
+        durationMs: classifierTrace.timing?.durationMs,
+        inputTokens: classifierTrace.response?.usage?.input_tokens,
+        outputTokens: classifierTrace.response?.usage?.output_tokens,
+      },
+    });
+
+    send("trace", {
+      stage: "classifier",
+      agent: "Classifier",
+      trace: classifierTrace,
+      intermediateOutput: domainProfile,
+    });
   }
-  if (isAborted()) return;
-
-  send("progress", {
-    stage: "classified",
-    message: `Identified ${domainProfile.companyName} (${domainProfile.ticker})`,
-    percent: 10,
-    domainProfile,
-    detail: `Domain: ${domainProfile.domainLabel} | Ticker: ${domainProfile.ticker} | Focus: ${domainProfile.focusAreas.join(", ") || "general"}`,
-    stats: {
-      model: classifierTrace.request?.model || ANTHROPIC_MODEL,
-      durationMs: classifierTrace.timing?.durationMs,
-      inputTokens: classifierTrace.response?.usage?.input_tokens,
-      outputTokens: classifierTrace.response?.usage?.output_tokens,
-    },
-  });
-
-  send("trace", {
-    stage: "classifier",
-    agent: "Classifier",
-    trace: classifierTrace,
-    intermediateOutput: domainProfile,
-  });
 
   // ── Stage 2: Research ───────────────────────────────────────────────────────
   send("progress", {

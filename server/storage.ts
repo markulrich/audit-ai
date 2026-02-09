@@ -75,7 +75,7 @@ async function getObject<T = unknown>(key: string): Promise<T | null> {
 
 // ── Slug generation ─────────────────────────────────────────────────────────────
 
-function generateSlug(meta: Report["meta"]): string {
+export function generateSlug(meta: Report["meta"]): string {
   const base = (meta?.ticker || meta?.title || "report")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -83,6 +83,17 @@ function generateSlug(meta: Report["meta"]): string {
     .slice(0, 30);
 
   // 4-char random suffix to avoid collisions
+  const suffix = Math.random().toString(36).slice(2, 6);
+  return `${base}-${suffix}`;
+}
+
+/** Generate a slug from a domain profile (used by classify endpoint before report exists). */
+export function generateSlugFromProfile(ticker: string, companyName: string): string {
+  const base = (ticker && ticker !== "N/A" ? ticker : companyName || "report")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 30);
   const suffix = Math.random().toString(36).slice(2, 6);
   return `${base}-${suffix}`;
 }
@@ -99,10 +110,19 @@ export async function saveReport(
 
   if (slug) {
     const existing = await getObject<SlugMeta>(`reports/${slug}/meta.json`);
-    if (!existing) {
-      throw new Error(`Report slug "${slug}" not found`);
+    if (existing) {
+      meta = existing;
+    } else {
+      // Slug was pre-generated (e.g. by classify endpoint) but not yet saved — create it
+      meta = {
+        slug,
+        title: report.meta?.title || "Untitled Report",
+        ticker: report.meta?.ticker || null,
+        currentVersion: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
     }
-    meta = existing;
   }
 
   if (!slug) {

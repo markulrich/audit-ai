@@ -12,12 +12,14 @@ import type { Request, Response, NextFunction } from "express";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { runPipeline } from "./pipeline";
-import { saveReport, getReport, listReports } from "./storage";
+import { saveReport, getReport, listReports, generateSlugFromProfile } from "./storage";
 import { getHealthStatus } from "./health";
+import { classifyDomain } from "./agents/classifier";
+import { getReasoningConfig } from "./reasoning-levels";
 
 import "./anthropic-client";
 
-import type { PipelineError, SendFn, Report, ChatMessage } from "../shared/types";
+import type { PipelineError, SendFn, Report, ChatMessage, DomainProfile, TraceData } from "../shared/types";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -102,6 +104,42 @@ app.get("/api/health", async (_req: Request, res: Response) => {
   } catch (err: unknown) {
     console.error("Health check error:", err);
     res.status(500).json({ status: "unhealthy", error: "Health check failed" });
+  }
+});
+
+// ── Classify endpoint: runs only the classifier and generates a slug ─────────
+
+app.post("/api/classify", rateLimit, async (req: Request, res: Response) => {
+  const { query, reasoningLevel } = req.body as { query: unknown; reasoningLevel?: string };
+
+  if (!query || typeof query !== "string" || query.trim().length < 3) {
+    return res.status(400).json({ error: "Query must be at least 3 characters" });
+  }
+  if ((query as string).length > MAX_QUERY_LENGTH) {
+    return res.status(400).json({ error: `Query too long (max ${MAX_QUERY_LENGTH} chars)` });
+  }
+
+  try {
+    const config = getReasoningConfig(reasoningLevel ?? "heavy");
+    const classifierResult = await classifyDomain(query.trim(), undefined, config);
+    const domainProfile = classifierResult.result;
+    const trace = classifierResult.trace;
+    const slug = generateSlugFromProfile(domainProfile.ticker, domainProfile.companyName);
+
+    res.json({ slug, domainProfile, trace });
+  } catch (thrown: unknown) {
+    const err = thrown as PipelineError;
+    console.error("Classify error:", err);
+
+    const message = err.keyMissing
+      ? "ANTHROPIC_API_KEY is not set."
+      : err.status === 401 || err.status === 403
+      ? `API key rejected (HTTP ${err.status}).`
+      : err.status === 429
+      ? "Rate limit hit. Please wait and try again."
+      : `Classification failed: ${err.message || "Unknown error"}`;
+
+    res.status(err.status && err.status >= 400 ? err.status : 500).json({ error: message });
   }
 });
 
@@ -191,12 +229,14 @@ app.post("/api/generate", rateLimit, async (req: Request, res: Response) => {
 // ── SSE endpoint: chat-based report generation ──────────────────────────────
 
 app.post("/api/chat", rateLimit, async (req: Request, res: Response) => {
-  const { query, conversationId, messageHistory, previousReport, reasoningLevel } = req.body as {
+  const { query, conversationId, messageHistory, previousReport, reasoningLevel, domainProfile: reqDomainProfile, classifierTrace: reqClassifierTrace } = req.body as {
     query: unknown;
     conversationId?: string;
     messageHistory?: Array<{ role: string; content: string }>;
     previousReport?: Report | null;
     reasoningLevel?: string;
+    domainProfile?: DomainProfile;
+    classifierTrace?: TraceData;
   };
 
   // Input validation
@@ -245,7 +285,8 @@ app.post("/api/chat", rateLimit, async (req: Request, res: Response) => {
         : [],
     };
 
-    await runPipeline(query.trim(), send, () => aborted, reasoningLevel, conversationContext);
+    const preClassified = reqDomainProfile ? { domainProfile: reqDomainProfile, trace: reqClassifierTrace || {} } : undefined;
+    await runPipeline(query.trim(), send, () => aborted, reasoningLevel, conversationContext, preClassified);
     if (!aborted) send("done", { success: true });
   } catch (thrown) {
     const err = thrown as PipelineError;
