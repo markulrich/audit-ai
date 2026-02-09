@@ -907,11 +907,50 @@ app.post("/api/chat", rateLimit, async (req: Request, res: Response) => {
 
 // ── Save / retrieve reports ─────────────────────────────────────────────────
 
+/** Validate a report payload before saving */
+function validateReportPayload(report: unknown): { valid: boolean; error?: string } {
+  if (!report || typeof report !== "object") {
+    return { valid: false, error: "Report must be an object" };
+  }
+
+  const r = report as Record<string, unknown>;
+
+  if (!("meta" in r) || !r.meta || typeof r.meta !== "object") {
+    return { valid: false, error: "Report must have a meta object" };
+  }
+
+  if (!("sections" in r) || !Array.isArray(r.sections)) {
+    return { valid: false, error: "Report must have a sections array" };
+  }
+
+  if (!("findings" in r) || !Array.isArray(r.findings)) {
+    return { valid: false, error: "Report must have a findings array" };
+  }
+
+  // Sanity check: max 200 findings (prevents oversized payloads)
+  if (r.findings.length > 200) {
+    return { valid: false, error: "Report has too many findings (max 200)" };
+  }
+
+  // Sanity check: max 50 sections
+  if (r.sections.length > 50) {
+    return { valid: false, error: "Report has too many sections (max 50)" };
+  }
+
+  return { valid: true };
+}
+
 app.post("/api/reports/save", async (req: Request, res: Response) => {
   const { report, slug, messages } = req.body as { report: unknown; slug?: string; messages?: ChatMessage[] };
 
-  if (!report || typeof report !== "object" || !("meta" in report) || !("sections" in report) || !Array.isArray((report as Record<string, unknown>).sections) || !Array.isArray((report as Record<string, unknown>).findings)) {
-    return res.status(400).json({ error: "Invalid report payload" });
+  const validation = validateReportPayload(report);
+  if (!validation.valid) {
+    return res.status(400).json({ error: validation.error });
+  }
+
+  // Validate slug if provided
+  if (slug && !/^[a-z0-9-]+$/.test(slug)) {
+    return res.status(400).json({ error: "Invalid slug format" });
   }
 
   try {
@@ -928,8 +967,13 @@ app.post("/api/reports/save", async (req: Request, res: Response) => {
 app.post("/api/reports/publish", async (req: Request, res: Response) => {
   const { report, slug, messages } = req.body as { report: unknown; slug?: string; messages?: ChatMessage[] };
 
-  if (!report || typeof report !== "object" || !("meta" in report) || !("sections" in report) || !Array.isArray((report as Record<string, unknown>).sections) || !Array.isArray((report as Record<string, unknown>).findings)) {
-    return res.status(400).json({ error: "Invalid report payload" });
+  const validation = validateReportPayload(report);
+  if (!validation.valid) {
+    return res.status(400).json({ error: validation.error });
+  }
+
+  if (slug && !/^[a-z0-9-]+$/.test(slug)) {
+    return res.status(400).json({ error: "Invalid slug format" });
   }
 
   try {
