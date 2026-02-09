@@ -11,6 +11,7 @@ import { getCertaintyColor, getCertaintyLabel } from "./shared/certainty-utils";
 import { useIsMobile } from "./shared/useIsMobile";
 import CertaintyBadge from "./shared/CertaintyBadge";
 import ExplanationPanel from "./shared/ExplanationPanel";
+import ExportMenu, { type ExportFormat } from "./shared/ExportMenu";
 
 // ─── Dark Theme Colors ──────────────────────────────────────────────────────────
 
@@ -136,6 +137,11 @@ export default function SlideDeck({ data, traceData, onBack, slug, saveState, on
   const [showPanel, setShowPanel] = useState<boolean>(false);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const isMobile = useIsMobile();
+
+  const handleExport = useCallback((format: ExportFormat) => {
+    // TODO: implement actual PDF/PPTX generation
+    console.log(`Export requested: ${format}`);
+  }, []);
 
   const { meta, sections, findings } = data;
 
@@ -379,6 +385,7 @@ export default function SlideDeck({ data, traceData, onBack, slug, saveState, on
             </span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <ExportMenu defaultFormat="pptx" onExport={handleExport} theme="dark" />
             <span
               onClick={() => handleActivate("overview")}
               style={{ cursor: "pointer" }}

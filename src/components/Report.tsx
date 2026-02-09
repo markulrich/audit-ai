@@ -12,6 +12,7 @@ import { COLORS, getCertaintyColor } from "./shared/certainty-utils";
 import { useIsMobile } from "./shared/useIsMobile";
 import CertaintyBadge from "./shared/CertaintyBadge";
 import ExplanationPanel from "./shared/ExplanationPanel";
+import ExportMenu, { type ExportFormat } from "./shared/ExportMenu";
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
 
@@ -116,6 +117,11 @@ export default function Report({ data, traceData, onBack, slug, saveState, onRet
   const [showPanel, setShowPanel] = useState<boolean>(false); // for mobile panel toggle
   const [showDetails, setShowDetails] = useState<boolean>(false);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+
+  const handleExport = useCallback((format: ExportFormat) => {
+    // TODO: implement actual PDF/PPTX generation
+    console.log(`Export requested: ${format}`);
+  }, []);
   const panelRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
 
@@ -296,6 +302,7 @@ export default function Report({ data, traceData, onBack, slug, saveState, onRet
                 View as Slides
               </button>
             )}
+            <ExportMenu defaultFormat="pdf" onExport={handleExport} theme="light" />
             {/* Save status + copy link */}
             <span
               style={{
