@@ -62,6 +62,7 @@ import {
   uploadAttachment,
   downloadAttachment,
   deleteAttachment,
+  detectMimeType,
 } from "./attachments";
 
 describe("attachments", () => {
@@ -355,6 +356,49 @@ describe("attachments", () => {
 
       expect(attachment.extractedText).toContain("Stream 1");
       expect(attachment.extractedText).toContain("Stream 2");
+    });
+  });
+
+  describe("detectMimeType", () => {
+    it("detects PDF from magic bytes", () => {
+      const pdfBuffer = Buffer.from("%PDF-1.4 content", "ascii");
+      expect(detectMimeType(pdfBuffer, "application/octet-stream")).toBe("application/pdf");
+    });
+
+    it("detects PNG from magic bytes", () => {
+      const pngBuffer = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+      expect(detectMimeType(pngBuffer, "application/octet-stream")).toBe("image/png");
+    });
+
+    it("detects JPEG from magic bytes", () => {
+      const jpegBuffer = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+      expect(detectMimeType(jpegBuffer, "application/octet-stream")).toBe("image/jpeg");
+    });
+
+    it("detects GIF from magic bytes", () => {
+      const gifBuffer = Buffer.from("GIF89a", "ascii");
+      expect(detectMimeType(gifBuffer, "application/octet-stream")).toBe("image/gif");
+    });
+
+    it("detects ZIP-based DOCX format", () => {
+      const zipHeader = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00]);
+      expect(detectMimeType(zipHeader, "application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
+        .toBe("application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    });
+
+    it("falls back to declared type for unknown magic bytes", () => {
+      const unknownBuffer = Buffer.from("unknown format content");
+      expect(detectMimeType(unknownBuffer, "text/custom")).toBe("text/custom");
+    });
+
+    it("falls back for very small buffers", () => {
+      const tinyBuffer = Buffer.from([0x01, 0x02]);
+      expect(detectMimeType(tinyBuffer, "text/plain")).toBe("text/plain");
+    });
+
+    it("corrects misidentified PDF (claimed as octet-stream)", () => {
+      const pdfBuffer = Buffer.from("%PDF-1.7\n1 0 obj", "ascii");
+      expect(detectMimeType(pdfBuffer, "application/octet-stream")).toBe("application/pdf");
     });
   });
 });

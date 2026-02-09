@@ -74,6 +74,47 @@ export function validateUpload(
   return { valid: true };
 }
 
+/**
+ * Detect the actual MIME type from file magic bytes.
+ * Falls back to the provided MIME type if detection fails.
+ */
+export function detectMimeType(buffer: Buffer, declaredMimeType: string): string {
+  if (buffer.length < 4) return declaredMimeType;
+
+  // PDF: starts with %PDF
+  if (buffer[0] === 0x25 && buffer[1] === 0x50 && buffer[2] === 0x44 && buffer[3] === 0x46) {
+    return "application/pdf";
+  }
+
+  // PNG: 89 50 4E 47
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
+    return "image/png";
+  }
+
+  // JPEG: FF D8 FF
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return "image/jpeg";
+  }
+
+  // GIF: GIF8
+  if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38) {
+    return "image/gif";
+  }
+
+  // ZIP-based formats (DOCX, XLSX, PPTX): PK\x03\x04
+  if (buffer[0] === 0x50 && buffer[1] === 0x4b && buffer[2] === 0x03 && buffer[3] === 0x04) {
+    // Try to distinguish between Office format types by filename extension
+    const lower = declaredMimeType.toLowerCase();
+    if (lower.includes("word") || lower.includes("docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    if (lower.includes("sheet") || lower.includes("xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    if (lower.includes("presentation") || lower.includes("pptx")) return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+    // If declared type is generic, keep it
+    return declaredMimeType;
+  }
+
+  return declaredMimeType;
+}
+
 /** Upload a file to S3 and return attachment metadata */
 export async function uploadAttachment(
   slug: string,
@@ -83,6 +124,10 @@ export async function uploadAttachment(
 ): Promise<Attachment> {
   const id = generateAttachmentId();
   const sanitizedFilename = filename.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 100);
+
+  // Detect actual MIME type from magic bytes (more reliable than client-provided type)
+  const detectedMimeType = detectMimeType(buffer, mimeType);
+
   const s3Key = `reports/${slug}/attachments/${id}-${sanitizedFilename}`;
 
   await s3.send(
@@ -90,17 +135,17 @@ export async function uploadAttachment(
       Bucket: BUCKET,
       Key: s3Key,
       Body: buffer,
-      ContentType: mimeType,
+      ContentType: detectedMimeType,
     })
   );
 
   // Extract text content from the file
-  const extractedText = await extractText(buffer, mimeType, filename);
+  const extractedText = await extractText(buffer, detectedMimeType, filename);
 
   const attachment: Attachment = {
     id,
     filename: sanitizedFilename,
-    mimeType,
+    mimeType: detectedMimeType,
     sizeBytes: buffer.length,
     s3Key,
     uploadedAt: new Date().toISOString(),
