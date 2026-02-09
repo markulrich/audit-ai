@@ -38,7 +38,7 @@ export async function runPipeline(
   preClassified?: { domainProfile: DomainProfile; trace: TraceData }
 ): Promise<void> {
   const pipelineStartTime: number = Date.now();
-  const config: ReasoningConfig = getReasoningConfig(reasoningLevel ?? "heavy");
+  const config: ReasoningConfig = getReasoningConfig(reasoningLevel ?? "x-light");
 
   send("progress", {
     stage: "config",

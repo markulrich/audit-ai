@@ -120,7 +120,7 @@ app.post("/api/classify", rateLimit, async (req: Request, res: Response) => {
   }
 
   try {
-    const config = getReasoningConfig(reasoningLevel ?? "heavy");
+    const config = getReasoningConfig(reasoningLevel ?? "x-light");
     const classifierResult = await classifyDomain(query.trim(), undefined, config);
     const domainProfile = classifierResult.result;
     const trace = classifierResult.trace;

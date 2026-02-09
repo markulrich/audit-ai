@@ -24,7 +24,7 @@ const REASONING_LEVELS: ReasoningLevelOption[] = [
   { value: "x-light", label: "X-Light", description: "Fastest — for testing" },
   { value: "light", label: "Light", description: "Faster — reduced scope" },
   { value: "heavy", label: "Heavy", description: "Full quality" },
-  { value: "x-heavy", label: "X-Heavy", description: "Maximum depth" },
+  { value: "x-heavy", label: "X-Heavy", description: "Maximum reasoning" },
 ];
 
 export default function QueryInput({ onSubmit, disabled, reasoningLevel, onReasoningLevelChange }: Props) {
