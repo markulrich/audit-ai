@@ -154,7 +154,14 @@ export default function App() {
       })
       .then((data: { report: Report; messages?: ChatMessage[]; version: number }) => {
         if (data.report) setCurrentReport(data.report);
-        if (data.messages && data.messages.length > 0) setMessages(data.messages);
+        if (data.messages && data.messages.length > 0) {
+          setMessages(data.messages);
+          // Restore trace data from the most recent assistant message that has it
+          const lastTraceMsg = [...data.messages].reverse().find((m) => m.traceData && m.traceData.length > 0);
+          if (lastTraceMsg?.traceData) {
+            setCurrentTraceData(lastTraceMsg.traceData);
+          }
+        }
         if (data.version) setReportVersion(data.version);
         setSlug(initialSlug);
         setSaveState("saved");
