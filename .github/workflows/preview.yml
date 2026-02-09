@@ -57,6 +57,36 @@ jobs:
             flyctl storage update "$TIGRIS_BUCKET" --app "$PREVIEW_APP"
           fi
 
+      - name: Ensure S3/Tigris env vars are set
+        run: |
+          check_s3_vars() {
+            local secrets
+            secrets=$(flyctl secrets list --app "$PREVIEW_APP" --json)
+            local missing=""
+            for var in BUCKET_NAME AWS_ENDPOINT_URL_S3 AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
+              if ! echo "$secrets" | jq -e ".[] | select(.Name == \"$var\")" > /dev/null 2>&1; then
+                missing="$missing $var"
+              fi
+            done
+            echo "$missing"
+          }
+
+          missing=$(check_s3_vars)
+          if [ -n "$missing" ]; then
+            echo "::warning::Missing Tigris S3 env vars:$missing — re-attaching storage bucket..."
+            flyctl storage update "$TIGRIS_BUCKET" --app "$PREVIEW_APP"
+
+            missing=$(check_s3_vars)
+            if [ -n "$missing" ]; then
+              echo "::error::Still missing after re-attach:$missing"
+              echo "Set them manually: fly secrets set BUCKET_NAME=... AWS_ENDPOINT_URL_S3=... AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... --app $PREVIEW_APP"
+              exit 1
+            fi
+            echo "Env vars restored after re-attaching storage."
+          else
+            echo "All required S3 env vars are set."
+          fi
+
       - name: Set Anthropic key
         run: |
           flyctl secrets set ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
