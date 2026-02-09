@@ -99,8 +99,8 @@ const STAGE_CONFIG: StageConfig[] = [
   {
     key: "verifying",
     doneKey: "verified",
-    label: "Verify Findings",
-    doneLabel: "Findings Verified",
+    label: "Audit Findings",
+    doneLabel: "Findings Audited",
     icon: "4",
     color: "#d97706",
   },
