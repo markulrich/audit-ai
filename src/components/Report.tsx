@@ -75,11 +75,14 @@ interface ExplanationPanelProps {
   overviewData: MethodologyData | undefined;
 }
 
+type SaveState = "idle" | "saving" | "saved" | "error";
+
 interface ReportProps {
   data: ReportData;
   traceData: TraceEvent[];
   onBack: () => void;
-  publishedSlug?: string | null;
+  slug?: string | null;
+  saveState?: SaveState;
 }
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
@@ -498,38 +501,12 @@ function useIsMobile(): boolean {
 
 // ─── Main Report Component ─────────────────────────────────────────────────────
 
-export default function Report({ data, traceData, onBack, publishedSlug }: ReportProps) {
+export default function Report({ data, traceData, onBack, slug, saveState }: ReportProps) {
   const [activeId, setActiveId] = useState<string>("overview");
   const [showPanel, setShowPanel] = useState<boolean>(false); // for mobile panel toggle
   const [showDetails, setShowDetails] = useState<boolean>(false);
-  const [publishState, setPublishState] = useState<"idle" | "publishing" | "done" | "error">(publishedSlug ? "done" : "idle");
-  const [publishedUrl, setPublishedUrl] = useState<string | null>(publishedSlug ? `/reports/${publishedSlug}` : null);
-  const [publishError, setPublishError] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
-
-  const handlePublish = async () => {
-    setPublishState("publishing");
-    setPublishError(null);
-    try {
-      const res = await fetch("/api/reports/publish", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ report: data, slug: publishedSlug || undefined }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || `Server error: ${res.status}`);
-      }
-      const result = await res.json();
-      setPublishedUrl(result.url);
-      setPublishState("done");
-    } catch (thrown: unknown) {
-      const err = thrown instanceof Error ? thrown : new Error(String(thrown));
-      setPublishError(err.message);
-      setPublishState("error");
-    }
-  };
 
   const { meta, sections, findings } = data;
 
@@ -666,23 +643,6 @@ export default function Report({ data, traceData, onBack, publishedSlug }: Repor
         <div style={{ maxWidth: 780, margin: "0 auto", padding: isMobile ? "20px 16px 60px" : "32px 40px 60px" }}>
           {/* Top buttons */}
           <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
-            {publishedSlug && (
-              <button
-                onClick={onBack}
-                style={{
-                  padding: "4px 12px",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  border: `1px solid ${COLORS.border}`,
-                  borderRadius: 4,
-                  background: COLORS.cardBg,
-                  cursor: "pointer",
-                  color: COLORS.text,
-                }}
-              >
-                ← Back
-              </button>
-            )}
             {traceData && traceData.length > 0 && (
               <button
                 onClick={() => setShowDetails(true)}
@@ -701,105 +661,48 @@ export default function Report({ data, traceData, onBack, publishedSlug }: Repor
                 Report Details
               </button>
             )}
-            {publishState === "idle" && (
-              <button
-                onClick={handlePublish}
-                aria-label="Publish report"
-                style={{
-                  padding: "4px 12px",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  border: `1px solid ${COLORS.green}40`,
-                  borderRadius: 4,
-                  background: COLORS.green + "0d",
-                  color: COLORS.green,
-                  cursor: "pointer",
-                  marginLeft: "auto",
-                }}
-              >
-                Publish
-              </button>
-            )}
-            {publishState === "publishing" && (
-              <span
-                style={{
-                  padding: "4px 12px",
-                  fontSize: 12,
-                  fontWeight: 500,
-                  color: COLORS.textMuted,
-                  marginLeft: "auto",
-                }}
-              >
-                Publishing...
-              </span>
-            )}
-            {publishState === "done" && publishedUrl && (
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  padding: "4px 12px",
-                  fontSize: 12,
-                  fontWeight: 500,
-                  color: COLORS.green,
-                  background: COLORS.green + "0d",
-                  border: `1px solid ${COLORS.green}30`,
-                  borderRadius: 4,
-                  marginLeft: "auto",
-                }}
-              >
-                Published
-                <button
-                  onClick={() => {
-                    const fullUrl = window.location.origin + publishedUrl;
-                    navigator.clipboard.writeText(fullUrl).catch(() => {});
-                  }}
-                  aria-label="Copy published report link"
-                  style={{
-                    border: `1px solid ${COLORS.green}40`,
-                    background: "#fff",
-                    borderRadius: 3,
-                    padding: "1px 8px",
-                    fontSize: 11,
-                    fontWeight: 600,
-                    color: COLORS.green,
-                    cursor: "pointer",
-                  }}
-                >
-                  Copy Link
-                </button>
-              </span>
-            )}
-            {publishState === "error" && (
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  fontSize: 12,
-                  color: COLORS.red,
-                  marginLeft: "auto",
-                }}
-              >
-                {publishError || "Publish failed"}
-                <button
-                  onClick={handlePublish}
-                  style={{
-                    border: `1px solid ${COLORS.red}40`,
-                    background: "#fff",
-                    borderRadius: 3,
-                    padding: "1px 8px",
-                    fontSize: 11,
-                    fontWeight: 600,
-                    color: COLORS.red,
-                    cursor: "pointer",
-                  }}
-                >
-                  Retry
-                </button>
-              </span>
-            )}
+            {/* Save status + copy link */}
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                marginLeft: "auto",
+                fontSize: 12,
+                fontWeight: 500,
+              }}
+            >
+              {saveState === "saving" && (
+                <span style={{ color: COLORS.textMuted }}>Autosaving...</span>
+              )}
+              {saveState === "saved" && slug && (
+                <>
+                  <span style={{ color: COLORS.green }}>Saved</span>
+                  <button
+                    onClick={() => {
+                      const fullUrl = window.location.origin + `/reports/${slug}`;
+                      navigator.clipboard.writeText(fullUrl).catch(() => {});
+                    }}
+                    aria-label="Copy report link"
+                    style={{
+                      border: `1px solid ${COLORS.green}40`,
+                      background: "#fff",
+                      borderRadius: 3,
+                      padding: "1px 8px",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: COLORS.green,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Copy Link
+                  </button>
+                </>
+              )}
+              {saveState === "error" && (
+                <span style={{ color: COLORS.red }}>Save failed</span>
+              )}
+            </span>
           </div>
 
           {/* Overall Certainty Banner */}

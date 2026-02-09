@@ -51,6 +51,25 @@ interface Report {
   findings: unknown[];
 }
 
+// Mock JSON response for auto-save calls
+function createJsonResponse(data: unknown) {
+  return {
+    ok: true,
+    json: () => Promise.resolve(data),
+    body: null,
+  };
+}
+
+// Smart fetch mock that routes /api/chat to SSE and /api/reports/save to JSON
+function mockFetchWithSse(sseResponse: ChunkedSseResponse) {
+  return vi.fn().mockImplementation((url: string) => {
+    if (typeof url === "string" && url.includes("/api/reports/save")) {
+      return Promise.resolve(createJsonResponse({ slug: "test-slug", version: 1, url: "/reports/test-slug" }));
+    }
+    return Promise.resolve(sseResponse);
+  });
+}
+
 // Helper: type a query into the ChatPanel textarea and submit
 async function submitQuery(user: ReturnType<typeof userEvent.setup>, queryText: string) {
   // The ChatPanel has example chip buttons — click one to submit
@@ -61,6 +80,8 @@ async function submitQuery(user: ReturnType<typeof userEvent.setup>, queryText: 
 describe("App SSE parsing", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    // Reset URL that may have been changed by auto-save pushState
+    window.history.pushState(null, "", "/");
   });
 
   it("renders a report when event and data are in the same chunk", async () => {
@@ -80,7 +101,7 @@ describe("App SSE parsing", () => {
 
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
+      mockFetchWithSse(
         createChunkedSseResponse([
           `event: report\ndata: ${JSON.stringify(report)}\n\n`,
           "event: done\ndata: {\"success\":true}\n\n",
@@ -114,7 +135,7 @@ describe("App SSE parsing", () => {
 
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
+      mockFetchWithSse(
         createChunkedSseResponse([
           "event: progress\n",
           'data: {"stage":"classifying","message":"Analyzing your query...","percent":5}\n\n',
@@ -152,7 +173,7 @@ describe("App SSE parsing", () => {
 
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
+      mockFetchWithSse(
         createChunkedSseResponse([
           "event: report\n",
           `data:${JSON.stringify(report)}\n\n`,
@@ -186,7 +207,7 @@ describe("App SSE parsing", () => {
 
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
+      mockFetchWithSse(
         createChunkedSseResponse([JSON.stringify(report)])
       )
     );
@@ -203,7 +224,7 @@ describe("App SSE parsing", () => {
   it("shows error message when stream contains progress then error", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
+      mockFetchWithSse(
         createChunkedSseResponse([
           "event: progress\n",
           'data: {"stage":"classifying","message":"Analyzing your query...","percent":5}\n\n',

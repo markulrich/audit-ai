@@ -12,12 +12,12 @@ import type { Request, Response, NextFunction } from "express";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { runPipeline } from "./pipeline";
-import { publishReport, getReport, listReports } from "./storage";
+import { saveReport, getReport, listReports } from "./storage";
 import { getHealthStatus } from "./health";
 
 import "./anthropic-client";
 
-import type { PipelineError, SendFn, Report } from "../shared/types";
+import type { PipelineError, SendFn, Report, ChatMessage } from "../shared/types";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -281,22 +281,40 @@ app.post("/api/chat", rateLimit, async (req: Request, res: Response) => {
   }
 });
 
-// ── Publish / retrieve reports ──────────────────────────────────────────────
+// ── Save / retrieve reports ─────────────────────────────────────────────────
 
-app.post("/api/reports/publish", async (req: Request, res: Response) => {
-  const { report, slug } = req.body as { report: unknown; slug?: string };
+app.post("/api/reports/save", async (req: Request, res: Response) => {
+  const { report, slug, messages } = req.body as { report: unknown; slug?: string; messages?: ChatMessage[] };
 
   if (!report || typeof report !== "object" || !("meta" in report) || !("sections" in report) || !Array.isArray((report as Record<string, unknown>).sections) || !Array.isArray((report as Record<string, unknown>).findings)) {
     return res.status(400).json({ error: "Invalid report payload" });
   }
 
   try {
-    const result = await publishReport(report as Report, slug || undefined);
+    const result = await saveReport(report as Report, slug || undefined, messages);
     res.json(result);
   } catch (thrown: unknown) {
     const err = thrown instanceof Error ? thrown : new Error(String(thrown));
-    console.error("Publish error:", err);
-    res.status(500).json({ error: err.message || "Failed to publish report" });
+    console.error("Save error:", err);
+    res.status(500).json({ error: err.message || "Failed to save report" });
+  }
+});
+
+// Keep old endpoint for backward compatibility
+app.post("/api/reports/publish", async (req: Request, res: Response) => {
+  const { report, slug, messages } = req.body as { report: unknown; slug?: string; messages?: ChatMessage[] };
+
+  if (!report || typeof report !== "object" || !("meta" in report) || !("sections" in report) || !Array.isArray((report as Record<string, unknown>).sections) || !Array.isArray((report as Record<string, unknown>).findings)) {
+    return res.status(400).json({ error: "Invalid report payload" });
+  }
+
+  try {
+    const result = await saveReport(report as Report, slug || undefined, messages);
+    res.json(result);
+  } catch (thrown: unknown) {
+    const err = thrown instanceof Error ? thrown : new Error(String(thrown));
+    console.error("Save error:", err);
+    res.status(500).json({ error: err.message || "Failed to save report" });
   }
 });
 

@@ -12,7 +12,7 @@
  */
 
 import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command, HeadBucketCommand } from "@aws-sdk/client-s3";
-import type { Report } from "../shared/types";
+import type { Report, ChatMessage } from "../shared/types";
 
 // ── S3 client ─────────────────────────────────────────────────────────────────
 
@@ -43,6 +43,7 @@ interface VersionSnapshot {
   version: number;
   publishedAt: string;
   report: Report;
+  messages?: ChatMessage[];
 }
 
 // ── Low-level helpers ───────────────────────────────────────────────────────────
@@ -88,9 +89,10 @@ function generateSlug(meta: Report["meta"]): string {
 
 // ── Public API ──────────────────────────────────────────────────────────────────
 
-export async function publishReport(
+export async function saveReport(
   report: Report,
-  existingSlug?: string
+  existingSlug?: string,
+  messages?: ChatMessage[],
 ): Promise<{ slug: string; version: number; url: string }> {
   let slug = existingSlug;
   let meta: SlugMeta | undefined;
@@ -117,12 +119,14 @@ export async function publishReport(
 
   const version = meta!.currentVersion + 1;
 
-  // Store the versioned snapshot
-  await putObject(`reports/${slug}/v${version}.json`, {
+  // Store the versioned snapshot (report + conversation)
+  const snapshot: VersionSnapshot = {
     version,
     publishedAt: new Date().toISOString(),
     report,
-  });
+    ...(messages && messages.length > 0 ? { messages } : {}),
+  };
+  await putObject(`reports/${slug}/v${version}.json`, snapshot);
 
   // Update meta pointer
   meta!.currentVersion = version;
@@ -134,10 +138,13 @@ export async function publishReport(
   return { slug, version, url: `/reports/${slug}` };
 }
 
+/** @deprecated Use saveReport instead */
+export const publishReport = saveReport;
+
 export async function getReport(
   slug: string,
   version?: number
-): Promise<{ slug: string; currentVersion: number; createdAt: string; version: number; publishedAt: string; report: Report } | null> {
+): Promise<{ slug: string; currentVersion: number; createdAt: string; version: number; publishedAt: string; report: Report; messages?: ChatMessage[] } | null> {
   const meta = await getObject<SlugMeta>(`reports/${slug}/meta.json`);
   if (!meta) return null;
 

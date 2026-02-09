@@ -37,6 +37,8 @@ const REASONING_LEVELS: ReasoningLevelOption[] = [
   { value: "x-heavy", label: "X-Heavy", description: "Maximum depth" },
 ];
 
+type SaveState = "idle" | "saving" | "saved" | "error";
+
 interface Props {
   messages: ChatMessage[];
   isGenerating: boolean;
@@ -47,6 +49,7 @@ interface Props {
   onNewConversation: () => void;
   reasoningLevel: string;
   onReasoningLevelChange: (level: string) => void;
+  saveState?: SaveState;
 }
 
 function ProgressInline({ progress, error }: { progress: ProgressEvent[]; error: ErrorInfo | null }) {
@@ -147,6 +150,7 @@ export default function ChatPanel({
   onNewConversation,
   reasoningLevel,
   onReasoningLevelChange,
+  saveState,
 }: Props) {
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -209,6 +213,15 @@ export default function ChatPanel({
           }}>
             Doubly<span style={{ color: COLORS.orange }}>AI</span>
           </h1>
+          {saveState === "saving" && (
+            <span style={{ fontSize: 10, color: COLORS.textMuted, fontWeight: 500 }}>Autosaving...</span>
+          )}
+          {saveState === "saved" && (
+            <span style={{ fontSize: 10, color: COLORS.green, fontWeight: 500 }}>Saved</span>
+          )}
+          {saveState === "error" && (
+            <span style={{ fontSize: 10, color: COLORS.red, fontWeight: 500 }}>Save failed</span>
+          )}
         </div>
         <button
           onClick={onNewConversation}

@@ -12,7 +12,7 @@ import ReportView from "./components/Report";
 import ReportsPage from "./components/ReportsPage";
 import HealthPage from "./components/HealthPage";
 
-// ── SSE parsing (unchanged from original) ────────────────────────────────────
+// ── SSE parsing ─────────────────────────────────────────────────────────────
 
 function isReportPayload(value: unknown): value is Report {
   return (
@@ -59,7 +59,7 @@ function parseSseBlock(block: string): SseBlock | null {
 
 // ── Routing helpers ──────────────────────────────────────────────────────────
 
-function getPublishedSlug() {
+function getSlugFromPath() {
   const match = window.location.pathname.match(/^\/reports\/([a-z0-9-]+)$/);
   return match ? match[1] : null;
 }
@@ -83,45 +83,19 @@ function genConversationId(): string {
   return `conv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+// ── Save state type ─────────────────────────────────────────────────────────
+
+export type SaveState = "idle" | "saving" | "saved" | "error";
+
 // ── Main App ─────────────────────────────────────────────────────────────────
 
 export default function App() {
-  // Special routes — keep existing behavior for /reports, /health, /reports/:slug
-  const [specialRoute] = useState<string | null>(() => {
+  // Utility routes (health, reports list) — separate from main flow
+  const [utilityRoute] = useState<string | null>(() => {
     if (isHealthRoute()) return "health";
     if (isReportsListRoute()) return "reports-list";
-    if (getPublishedSlug()) return "published";
     return null;
   });
-
-  // Published report loading
-  const [publishedReport, setPublishedReport] = useState<Report | null>(null);
-  const [publishedSlug, setPublishedSlug] = useState<string | null>(getPublishedSlug);
-  const [publishedError, setPublishedError] = useState<string | null>(null);
-  const [publishedTraceData] = useState<TraceEvent[]>([]);
-
-  useEffect(() => {
-    if (specialRoute !== "published") return;
-    const slug = getPublishedSlug();
-    if (!slug) return;
-
-    const params = new URLSearchParams(window.location.search);
-    const version = params.get("v");
-    const url = `/api/reports/${slug}${version ? `?v=${version}` : ""}`;
-
-    fetch(url)
-      .then((res) => {
-        if (!res.ok) throw new Error(res.status === 404 ? "Report not found" : `Error ${res.status}`);
-        return res.json();
-      })
-      .then((data: { report: Report }) => {
-        setPublishedReport(data.report);
-        setPublishedSlug(slug);
-      })
-      .catch((err: Error) => {
-        setPublishedError(err.message || "Failed to load report");
-      });
-  }, [specialRoute]);
 
   // ── Conversation state ──────────────────────────────────────────────────────
   const [conversationId, setConversationId] = useState<string>(genConversationId);
@@ -134,6 +108,73 @@ export default function App() {
   const [reasoningLevel, setReasoningLevel] = useState<string>("heavy");
   const [reportVersion, setReportVersion] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
+
+  // ── Save / slug state ───────────────────────────────────────────────────────
+  const [slug, setSlug] = useState<string | null>(getSlugFromPath);
+  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [isLoadingSlug, setIsLoadingSlug] = useState<boolean>(!!getSlugFromPath());
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  // ── Load saved report+conversation when visiting /reports/:slug ──────────
+  useEffect(() => {
+    const initialSlug = getSlugFromPath();
+    if (!initialSlug) return;
+
+    const params = new URLSearchParams(window.location.search);
+    const version = params.get("v");
+    const url = `/api/reports/${initialSlug}${version ? `?v=${version}` : ""}`;
+
+    fetch(url)
+      .then((res) => {
+        if (!res.ok) throw new Error(res.status === 404 ? "Report not found" : `Error ${res.status}`);
+        return res.json();
+      })
+      .then((data: { report: Report; messages?: ChatMessage[]; version: number }) => {
+        if (data.report) setCurrentReport(data.report);
+        if (data.messages && data.messages.length > 0) setMessages(data.messages);
+        if (data.version) setReportVersion(data.version);
+        setSlug(initialSlug);
+        setSaveState("saved");
+        setIsLoadingSlug(false);
+      })
+      .catch((err: Error) => {
+        setLoadError(err.message || "Failed to load report");
+        setIsLoadingSlug(false);
+      });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Auto-save helper ────────────────────────────────────────────────────────
+  const autoSave = useCallback(async (report: Report, allMessages: ChatMessage[], currentSlug: string | null): Promise<string | null> => {
+    setSaveState("saving");
+    try {
+      const res = await fetch("/api/reports/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          report,
+          slug: currentSlug || undefined,
+          messages: allMessages,
+        }),
+      });
+      if (!res.ok) {
+        throw new Error(`Save failed: ${res.status}`);
+      }
+      const result = await res.json() as { slug: string; version: number; url: string };
+      setSaveState("saved");
+
+      // If this is the first save, navigate to the report URL
+      if (!currentSlug) {
+        setSlug(result.slug);
+        window.history.pushState(null, "", result.url);
+      }
+
+      return result.slug;
+    } catch (err) {
+      console.error("Auto-save error:", err);
+      setSaveState("error");
+      return currentSlug;
+    }
+  }, []);
 
   const handleNewConversation = useCallback(() => {
     if (abortRef.current) {
@@ -148,6 +189,10 @@ export default function App() {
     setLiveProgress([]);
     setLiveError(null);
     setReportVersion(0);
+    setSlug(null);
+    setSaveState("idle");
+    setLoadError(null);
+    window.history.pushState(null, "", "/");
   }, []);
 
   const handleAbort = useCallback(() => {
@@ -198,6 +243,7 @@ export default function App() {
     // Local flags to avoid stale closure over React state
     let receivedReport = false;
     let receivedError = false;
+    let finalReport: Report | null = null;
     let collectedProgress: ProgressEvent[] = [];
     let collectedTraceData: TraceEvent[] = [];
     let collectedError: ErrorInfo | null = null;
@@ -263,7 +309,8 @@ export default function App() {
 
         if (eventType === "report" || (eventType === "message" && isReportPayload(payload))) {
           receivedReport = true;
-          setCurrentReport(payload as Report);
+          finalReport = payload as Report;
+          setCurrentReport(finalReport);
           setReportVersion(newVersion);
           return;
         }
@@ -316,24 +363,26 @@ export default function App() {
       buffer += decoder.decode();
       flushBuffer(true);
 
-      // Done — add assistant message
+      // Done — add assistant message and auto-save
       setIsGenerating(false);
       setLiveProgress([]);
       setLiveError(null);
 
-      if (receivedReport) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: genId(),
-            role: "assistant" as const,
-            content: `Report ${newVersion > 1 ? `updated (v${newVersion})` : "generated"} successfully.`,
-            timestamp: Date.now(),
-            reportVersion: newVersion,
-            progress: collectedProgress,
-            traceData: collectedTraceData,
-          },
-        ]);
+      if (receivedReport && finalReport) {
+        const assistantMsg: ChatMessage = {
+          id: genId(),
+          role: "assistant" as const,
+          content: `Report ${newVersion > 1 ? `updated (v${newVersion})` : "generated"} successfully.`,
+          timestamp: Date.now(),
+          reportVersion: newVersion,
+          progress: collectedProgress,
+          traceData: collectedTraceData,
+        };
+        const allMessages = [...messages, userMsg, assistantMsg];
+        setMessages(allMessages);
+
+        // Auto-save report + conversation
+        autoSave(finalReport, allMessages, slug);
       } else if (receivedError) {
         setMessages((prev) => [
           ...prev,
@@ -388,75 +437,68 @@ export default function App() {
         },
       ]);
     }
-  }, [conversationId, messages, currentReport, reasoningLevel, reportVersion]);
+  }, [conversationId, messages, currentReport, reasoningLevel, reportVersion, slug, autoSave]);
 
-  // ── Special routes ──────────────────────────────────────────────────────────
+  // ── Utility routes ────────────────────────────────────────────────────────
 
   const handleRouteBack = () => {
     window.history.pushState(null, "", "/");
     window.location.reload();
   };
 
-  if (specialRoute === "health") {
+  if (utilityRoute === "health") {
     return <HealthPage onBack={handleRouteBack} />;
   }
 
-  if (specialRoute === "reports-list") {
+  if (utilityRoute === "reports-list") {
     return <ReportsPage onBack={handleRouteBack} />;
   }
 
-  if (specialRoute === "published") {
-    if (publishedError) {
-      return (
-        <div style={{
-          minHeight: "100vh",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "60px 24px",
-        }}>
-          <div style={{ fontSize: 14, color: "#b91c1c", fontWeight: 500 }}>{publishedError}</div>
-          <button
-            onClick={handleRouteBack}
-            style={{
-              marginTop: 16,
-              padding: "6px 16px",
-              fontSize: 12,
-              fontWeight: 600,
-              border: "1px solid #e2e4ea",
-              borderRadius: 4,
-              background: "#fff",
-              cursor: "pointer",
-              color: "#1a1a2e",
-            }}
-          >
-            Back
-          </button>
-        </div>
-      );
-    }
-    if (!publishedReport) {
-      return (
-        <div style={{
-          minHeight: "100vh",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          padding: "60px 24px",
-        }}>
-          <div style={{ fontSize: 14, color: "#8a8ca5", fontWeight: 500 }}>Loading report...</div>
-        </div>
-      );
-    }
+  // ── Loading state for /reports/:slug ───────────────────────────────────────
+
+  if (isLoadingSlug) {
     return (
-      <ReportView
-        data={publishedReport}
-        traceData={publishedTraceData}
-        onBack={handleRouteBack}
-        publishedSlug={publishedSlug}
-      />
+      <div style={{
+        minHeight: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "60px 24px",
+      }}>
+        <div style={{ fontSize: 14, color: "#8a8ca5", fontWeight: 500 }}>Loading report...</div>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div style={{
+        minHeight: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "60px 24px",
+      }}>
+        <div style={{ fontSize: 14, color: "#b91c1c", fontWeight: 500 }}>{loadError}</div>
+        <button
+          onClick={handleRouteBack}
+          style={{
+            marginTop: 16,
+            padding: "6px 16px",
+            fontSize: 12,
+            fontWeight: 600,
+            border: "1px solid #e2e4ea",
+            borderRadius: 4,
+            background: "#fff",
+            cursor: "pointer",
+            color: "#1a1a2e",
+          }}
+        >
+          Back
+        </button>
+      </div>
     );
   }
 
@@ -487,6 +529,7 @@ export default function App() {
           onNewConversation={handleNewConversation}
           reasoningLevel={reasoningLevel}
           onReasoningLevelChange={setReasoningLevel}
+          saveState={saveState}
         />
       </div>
 
@@ -501,7 +544,8 @@ export default function App() {
             data={currentReport}
             traceData={currentTraceData}
             onBack={handleNewConversation}
-            publishedSlug={null}
+            slug={slug}
+            saveState={saveState}
           />
         ) : (
           <div style={{
