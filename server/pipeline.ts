@@ -14,6 +14,7 @@ import type {
   Report,
   ReasoningConfig,
   CertaintyBuckets,
+  ConversationContext,
 } from "../shared/types";
 
 /**
@@ -24,12 +25,16 @@ import type {
  *   2. Research — gather evidence from sources
  *   3. Synthesize — draft findings + report structure
  *   4. Verify — adversarial review, add contrary evidence, assign certainty
+ *
+ * When conversationContext is provided, agents receive the previous report
+ * and message history so they can build on prior work.
  */
 export async function runPipeline(
   query: string,
   send: SendFn,
   isAborted: () => boolean = () => false,
-  reasoningLevel?: string
+  reasoningLevel?: string,
+  conversationContext?: ConversationContext
 ): Promise<void> {
   const pipelineStartTime: number = Date.now();
   const config: ReasoningConfig = getReasoningConfig(reasoningLevel ?? "heavy");
@@ -73,7 +78,7 @@ export async function runPipeline(
   let domainProfile: DomainProfile;
   let classifierTrace: TraceData;
   try {
-    const classifierResult = await classifyDomain(query, send, config);
+    const classifierResult = await classifyDomain(query, send, config, conversationContext);
     domainProfile = classifierResult.result;
     classifierTrace = classifierResult.trace;
   } catch (err) {
@@ -121,7 +126,7 @@ export async function runPipeline(
   let evidence: EvidenceItem[];
   let researcherTrace: TraceData;
   try {
-    const researcherResult = await research(query, domainProfile, send, config);
+    const researcherResult = await research(query, domainProfile, send, config, conversationContext);
     evidence = researcherResult.result;
     researcherTrace = researcherResult.trace;
   } catch (err) {
@@ -186,7 +191,7 @@ export async function runPipeline(
   let draft: Report;
   let synthesizerTrace: TraceData;
   try {
-    const synthesizerResult = await synthesize(query, domainProfile, evidence, send, config);
+    const synthesizerResult = await synthesize(query, domainProfile, evidence, send, config, conversationContext);
     draft = synthesizerResult.result;
     synthesizerTrace = synthesizerResult.trace;
   } catch (err) {
@@ -243,7 +248,7 @@ export async function runPipeline(
   let report: Report;
   let verifierTrace: TraceData;
   try {
-    const verifierResult = await verify(query, domainProfile, draft, send, config);
+    const verifierResult = await verify(query, domainProfile, draft, send, config, conversationContext);
     report = verifierResult.result;
     verifierTrace = verifierResult.trace;
   } catch (err) {

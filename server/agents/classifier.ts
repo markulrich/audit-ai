@@ -7,6 +7,7 @@ import type {
   SendFn,
   AgentResult,
   TraceData,
+  ConversationContext,
 } from "../../shared/types";
 
 /** Shape of the JSON the classifier LLM returns. */
@@ -59,15 +60,20 @@ export async function classifyDomain(
   query: string,
   send: SendFn | undefined,
   config: Partial<ReasoningConfig> = {},
+  conversationContext?: ConversationContext,
 ): Promise<AgentResult<DomainProfile>> {
+  // If we have a previous report, we can shortcut classification
+  const contextNote = conversationContext?.previousReport?.meta?.ticker
+    ? `\nThis is a follow-up message in an ongoing conversation about ${conversationContext.previousReport.meta.title || "a company"}. The previous report covered ${conversationContext.previousReport.meta.ticker}. The user may be refining, asking follow-ups, or exploring a new topic. Classify accordingly.`
+    : "";
+
   const params: CreateMessageParams = {
     model: config.classifierModel || ANTHROPIC_MODEL,
     system: `You are a query classifier for DoublyAI, an explainable research platform.
-Given a user query, determine which research domain it belongs to.
+Given a user query, identify the research domain, company, and focus areas.
 
-Currently supported domains:
-- equity_research: Stock analysis, company financials, earnings, market data, analyst ratings, price targets, competitive positioning of public companies.
-
+Supported domains: equity_research (stock/company analysis). Default to this for V1.
+${contextNote}
 Respond with JSON only:
 {
   "domain": "equity_research",
@@ -75,10 +81,7 @@ Respond with JSON only:
   "companyName": "NVIDIA Corporation",
   "focusAreas": ["financials", "competition", "product_roadmap"],
   "timeframe": "current"
-}
-
-If the query doesn't match any supported domain, still use "equity_research" as the closest match for V1.
-Extract the stock ticker if mentioned or inferable. Extract the company name.`,
+}`,
     messages: [{ role: "user" as const, content: `<user_query>\n${query}\n</user_query>` }],
   };
 

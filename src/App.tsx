@@ -1,10 +1,18 @@
-import { useState, useRef, useEffect } from "react";
-import type { Report, ProgressEvent, TraceEvent, ErrorInfo, ErrorDetail } from "../shared/types";
-import QueryInput from "./components/QueryInput";
-import ProgressStream from "./components/ProgressStream";
-import Report_ from "./components/Report";
+import { useState, useRef, useCallback, useEffect } from "react";
+import type {
+  Report,
+  ProgressEvent,
+  TraceEvent,
+  ErrorInfo,
+  ErrorDetail,
+  ChatMessage,
+} from "../shared/types";
+import ChatPanel from "./components/ChatPanel";
+import ReportView from "./components/Report";
 import ReportsPage from "./components/ReportsPage";
 import HealthPage from "./components/HealthPage";
+
+// ── SSE parsing (unchanged from original) ────────────────────────────────────
 
 function isReportPayload(value: unknown): value is Report {
   return (
@@ -49,7 +57,8 @@ function parseSseBlock(block: string): SseBlock | null {
   return { eventType, data: dataLines.join("\n") };
 }
 
-// Check if we're on a /reports/:slug route
+// ── Routing helpers ──────────────────────────────────────────────────────────
+
 function getPublishedSlug() {
   const match = window.location.pathname.match(/^\/reports\/([a-z0-9-]+)$/);
   return match ? match[1] : null;
@@ -63,20 +72,36 @@ function isHealthRoute() {
   return window.location.pathname === "/health" || window.location.pathname === "/health/";
 }
 
-export default function App() {
-  const [state, setState] = useState<"idle" | "loading" | "loading-published" | "done" | "error" | "reports-list" | "health">(
-    () => isHealthRoute() ? "health" : isReportsListRoute() ? "reports-list" : getPublishedSlug() ? "loading-published" : "idle"
-  );
-  const [progress, setProgress] = useState<ProgressEvent[]>([]);
-  const [report, setReport] = useState<Report | null>(null);
-  const [error, setError] = useState<ErrorInfo | null>(null);
-  const [traceData, setTraceData] = useState<TraceEvent[]>([]);
-  const [reasoningLevel, setReasoningLevel] = useState<string>("heavy");
-  const [publishedSlug, setPublishedSlug] = useState<string | null>(getPublishedSlug);
-  const abortRef = useRef<AbortController | null>(null);
+// ── Unique ID generator ──────────────────────────────────────────────────────
 
-  // Load published report on mount if URL matches /reports/:slug
+let msgCounter = 0;
+function genId(): string {
+  return `msg-${Date.now()}-${++msgCounter}`;
+}
+
+function genConversationId(): string {
+  return `conv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// ── Main App ─────────────────────────────────────────────────────────────────
+
+export default function App() {
+  // Special routes — keep existing behavior for /reports, /health, /reports/:slug
+  const [specialRoute] = useState<string | null>(() => {
+    if (isHealthRoute()) return "health";
+    if (isReportsListRoute()) return "reports-list";
+    if (getPublishedSlug()) return "published";
+    return null;
+  });
+
+  // Published report loading
+  const [publishedReport, setPublishedReport] = useState<Report | null>(null);
+  const [publishedSlug, setPublishedSlug] = useState<string | null>(getPublishedSlug);
+  const [publishedError, setPublishedError] = useState<string | null>(null);
+  const [publishedTraceData] = useState<TraceEvent[]>([]);
+
   useEffect(() => {
+    if (specialRoute !== "published") return;
     const slug = getPublishedSlug();
     if (!slug) return;
 
@@ -90,38 +115,109 @@ export default function App() {
         return res.json();
       })
       .then((data: { report: Report }) => {
-        setReport(data.report);
+        setPublishedReport(data.report);
         setPublishedSlug(slug);
-        setState("done");
       })
       .catch((err: Error) => {
-        setError({ message: err.message || "Failed to load report", detail: null });
-        setState("error");
+        setPublishedError(err.message || "Failed to load report");
       });
+  }, [specialRoute]);
+
+  // ── Conversation state ──────────────────────────────────────────────────────
+  const [conversationId, setConversationId] = useState<string>(genConversationId);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [currentReport, setCurrentReport] = useState<Report | null>(null);
+  const [currentTraceData, setCurrentTraceData] = useState<TraceEvent[]>([]);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [liveProgress, setLiveProgress] = useState<ProgressEvent[]>([]);
+  const [liveError, setLiveError] = useState<ErrorInfo | null>(null);
+  const [reasoningLevel, setReasoningLevel] = useState<string>("heavy");
+  const [reportVersion, setReportVersion] = useState(0);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const handleNewConversation = useCallback(() => {
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+    setConversationId(genConversationId());
+    setMessages([]);
+    setCurrentReport(null);
+    setCurrentTraceData([]);
+    setIsGenerating(false);
+    setLiveProgress([]);
+    setLiveError(null);
+    setReportVersion(0);
   }, []);
 
-  const handleGenerate = async (query: string): Promise<void> => {
+  const handleAbort = useCallback(() => {
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+    setIsGenerating(false);
+
+    // Add an assistant message noting the abort
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: genId(),
+        role: "assistant" as const,
+        content: "Generation stopped.",
+        timestamp: Date.now(),
+        progress: liveProgress,
+        error: null,
+      },
+    ]);
+    setLiveProgress([]);
+    setLiveError(null);
+  }, [liveProgress]);
+
+  const handleSend = useCallback(async (userMessage: string) => {
     // Abort any in-flight request
     if (abortRef.current) abortRef.current.abort();
     const controller = new AbortController();
     abortRef.current = controller;
 
-    setState("loading");
-    setProgress([]);
-    setReport(null);
-    setError(null);
-    setTraceData([]);
-    setPublishedSlug(null);
+    // Add user message
+    const userMsg: ChatMessage = {
+      id: genId(),
+      role: "user",
+      content: userMessage,
+      timestamp: Date.now(),
+    };
+    setMessages((prev) => [...prev, userMsg]);
+
+    // Reset live state
+    setIsGenerating(true);
+    setLiveProgress([]);
+    setLiveError(null);
+
+    const newVersion = reportVersion + 1;
 
     // Local flags to avoid stale closure over React state
     let receivedReport = false;
     let receivedError = false;
+    let collectedProgress: ProgressEvent[] = [];
+    let collectedTraceData: TraceEvent[] = [];
+    let collectedError: ErrorInfo | null = null;
 
     try {
-      const res = await fetch("/api/generate", {
+      // Build message history for context
+      const messageHistory = messages
+        .concat(userMsg)
+        .map((m) => ({ role: m.role, content: m.content }));
+
+      const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query, reasoningLevel }),
+        body: JSON.stringify({
+          query: userMessage,
+          conversationId,
+          messageHistory,
+          previousReport: currentReport,
+          reasoningLevel,
+        }),
         signal: controller.signal,
       });
 
@@ -131,7 +227,7 @@ export default function App() {
       }
 
       if (!res.body) {
-        throw new Error("Empty response body from /api/generate");
+        throw new Error("Empty response body");
       }
 
       const reader = res.body.getReader();
@@ -140,12 +236,16 @@ export default function App() {
 
       const handleEventPayload = (eventType: string, payload: unknown): void => {
         if (eventType === "progress") {
-          setProgress((prev) => [...prev, payload as ProgressEvent]);
+          const evt = payload as ProgressEvent;
+          collectedProgress = [...collectedProgress, evt];
+          setLiveProgress((prev) => [...prev, evt]);
           return;
         }
 
         if (eventType === "trace") {
-          setTraceData((prev) => [...prev, payload as TraceEvent]);
+          const evt = payload as TraceEvent;
+          collectedTraceData = [...collectedTraceData, evt];
+          setCurrentTraceData((prev) => [...prev, evt]);
           return;
         }
 
@@ -153,19 +253,19 @@ export default function App() {
 
         if (eventType === "error" || (eventType === "message" && typeof data?.error === "string")) {
           receivedError = true;
-          const errorInfo: ErrorInfo = {
+          collectedError = {
             message: (data?.message as string) || (data?.error as string) || "Report generation failed.",
             detail: (data?.detail as ErrorDetail) || null,
           };
-          setError(errorInfo);
-          setState("error");
+          setLiveError(collectedError);
           return;
         }
 
         if (eventType === "report" || (eventType === "message" && isReportPayload(payload))) {
           receivedReport = true;
-          setReport(payload as Report);
-          setState("done");
+          setCurrentReport(payload as Report);
+          setReportVersion(newVersion);
+          return;
         }
       };
 
@@ -202,7 +302,6 @@ export default function App() {
           return;
         }
 
-        // Fallback: accept plain JSON 200 responses from non-streaming backends.
         handleSerializedData("message", buffer);
         buffer = "";
       };
@@ -217,219 +316,232 @@ export default function App() {
       buffer += decoder.decode();
       flushBuffer(true);
 
-      // If stream ended without a report or error event
-      if (!receivedReport && !receivedError) {
-        setState("error");
-        setError({ message: "Pipeline completed without producing a report.", detail: null });
+      // Done — add assistant message
+      setIsGenerating(false);
+      setLiveProgress([]);
+      setLiveError(null);
+
+      if (receivedReport) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: genId(),
+            role: "assistant" as const,
+            content: `Report ${newVersion > 1 ? `updated (v${newVersion})` : "generated"} successfully.`,
+            timestamp: Date.now(),
+            reportVersion: newVersion,
+            progress: collectedProgress,
+            traceData: collectedTraceData,
+          },
+        ]);
+      } else if (receivedError) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: genId(),
+            role: "assistant" as const,
+            content: collectedError?.message || "An error occurred.",
+            timestamp: Date.now(),
+            progress: collectedProgress,
+            error: collectedError,
+          },
+        ]);
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: genId(),
+            role: "assistant" as const,
+            content: "Pipeline completed without producing a report.",
+            timestamp: Date.now(),
+            progress: collectedProgress,
+            error: { message: "No report produced", detail: null },
+          },
+        ]);
       }
     } catch (rawErr: unknown) {
-      if (rawErr instanceof Error && rawErr.name === "AbortError") return; // User cancelled — do nothing
+      if (rawErr instanceof Error && rawErr.name === "AbortError") return;
 
       const err = rawErr instanceof Error ? rawErr : new Error(String(rawErr));
 
-      // Browser gives unhelpful messages like "Load failed" or "Failed to fetch"
-      // when the connection drops (e.g., server restart, network issue).
       const isNetworkError =
         rawErr instanceof TypeError &&
         /load failed|failed to fetch|network/i.test(err.message);
 
       const message = isNetworkError
-        ? "Connection to the server was lost — the server may have restarted or your network dropped. Please try again."
+        ? "Connection to the server was lost. Please try again."
         : err.message || "An unknown error occurred.";
 
-      setError({
-        message,
-        detail: {
-          originalError: err.message,
-          type: err.constructor?.name || "Error",
-          hint: isNetworkError
-            ? "This usually means the server process restarted mid-request. Your query was not completed."
-            : null,
+      setIsGenerating(false);
+      setLiveProgress([]);
+      setLiveError(null);
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: genId(),
+          role: "assistant" as const,
+          content: message,
+          timestamp: Date.now(),
+          progress: collectedProgress,
+          error: { message, detail: null },
         },
-      });
-      setState("error");
+      ]);
     }
+  }, [conversationId, messages, currentReport, reasoningLevel, reportVersion]);
+
+  // ── Special routes ──────────────────────────────────────────────────────────
+
+  const handleRouteBack = () => {
+    window.history.pushState(null, "", "/");
+    window.location.reload();
   };
 
-  const handleReset = (): void => {
-    // Abort any in-flight request
-    if (abortRef.current) {
-      abortRef.current.abort();
-      abortRef.current = null;
-    }
-    setState("idle");
-    setProgress([]);
-    setReport(null);
-    setError(null);
-    setTraceData([]);
-    setPublishedSlug(null);
-    // Clear /reports* from URL if present
-    if (window.location.pathname.startsWith("/reports")) {
-      window.history.pushState(null, "", "/");
-    }
-  };
-
-  if (state === "done" && report) {
-    return <Report_ data={report} traceData={traceData} onBack={handleReset} publishedSlug={publishedSlug} />;
+  if (specialRoute === "health") {
+    return <HealthPage onBack={handleRouteBack} />;
   }
 
-  if (state === "health") {
-    return <HealthPage onBack={handleReset} />;
+  if (specialRoute === "reports-list") {
+    return <ReportsPage onBack={handleRouteBack} />;
   }
 
-  if (state === "reports-list") {
-    return <ReportsPage onBack={handleReset} />;
-  }
-
-  if (state === "loading-published") {
-    return (
-      <div
-        style={{
+  if (specialRoute === "published") {
+    if (publishedError) {
+      return (
+        <div style={{
           minHeight: "100vh",
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
           padding: "60px 24px",
-        }}
-      >
-        <div style={{ fontSize: 14, color: "#8a8ca5", fontWeight: 500 }}>Loading report...</div>
-      </div>
-    );
-  }
-
-  return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: state === "idle" ? "center" : "flex-start",
-        padding: "60px 24px",
-        transition: "all 0.3s",
-      }}
-    >
-      {/* Logo */}
-      <div style={{ marginBottom: state === "idle" ? 40 : 24, textAlign: "center" }}>
-        <h1
-          style={{
-            fontSize: state === "idle" ? 42 : 28,
-            fontWeight: 800,
-            letterSpacing: -1,
-            color: "#1a1a2e",
-            transition: "font-size 0.3s",
-          }}
-        >
-          Doubly
-          <span style={{ color: "#b45309" }}>AI</span>
-        </h1>
-        <p
-          style={{
-            fontSize: 14,
-            color: "#8a8ca5",
-            marginTop: 6,
-            fontWeight: 500,
-          }}
-        >
-          What should I research?
-        </p>
-      </div>
-
-      {/* Query Input */}
-      <QueryInput
-        onSubmit={handleGenerate}
-        disabled={state === "loading"}
-        reasoningLevel={reasoningLevel}
-        onReasoningLevelChange={setReasoningLevel}
-      />
-
-      {/* Progress */}
-      {state === "loading" && (
-        <>
-          <ProgressStream steps={progress} traceData={traceData} error={error} />
+        }}>
+          <div style={{ fontSize: 14, color: "#b91c1c", fontWeight: 500 }}>{publishedError}</div>
           <button
-            onClick={handleReset}
+            onClick={handleRouteBack}
             style={{
               marginTop: 16,
-              padding: "6px 20px",
+              padding: "6px 16px",
               fontSize: 12,
               fontWeight: 600,
               border: "1px solid #e2e4ea",
               borderRadius: 4,
               background: "#fff",
               cursor: "pointer",
-              color: "#555770",
+              color: "#1a1a2e",
             }}
           >
-            Cancel
+            Back
           </button>
-        </>
-      )}
+        </div>
+      );
+    }
+    if (!publishedReport) {
+      return (
+        <div style={{
+          minHeight: "100vh",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "60px 24px",
+        }}>
+          <div style={{ fontSize: 14, color: "#8a8ca5", fontWeight: 500 }}>Loading report...</div>
+        </div>
+      );
+    }
+    return (
+      <ReportView
+        data={publishedReport}
+        traceData={publishedTraceData}
+        onBack={handleRouteBack}
+        publishedSlug={publishedSlug}
+      />
+    );
+  }
 
-      {/* Error */}
-      {state === "error" && (
-        <>
-          {/* Show all intermediate progress/trace data accumulated before error */}
-          {progress.length > 0 && (
-            <ProgressStream steps={progress} traceData={traceData} error={error} />
-          )}
-          <div
-            style={{
-              marginTop: 24,
-              padding: "16px 24px",
-              background: "#b91c1c0a",
-              border: "1px solid #b91c1c30",
-              borderRadius: 6,
-              maxWidth: 700,
-              width: "100%",
-            }}
-          >
-            <div style={{ fontSize: 13, fontWeight: 600, color: "#b91c1c", marginBottom: 4 }}>
-              Generation Failed{error?.detail?.stage ? ` (stage: ${error.detail.stage})` : ""}
+  // ── Main split-pane layout ──────────────────────────────────────────────────
+
+  return (
+    <div style={{
+      display: "flex",
+      height: "100vh",
+      width: "100%",
+      overflow: "hidden",
+      background: "#fafafa",
+    }}>
+      {/* Left: Chat panel */}
+      <div style={{
+        flex: "0 0 360px",
+        minWidth: 300,
+        maxWidth: 420,
+        overflow: "hidden",
+      }}>
+        <ChatPanel
+          messages={messages}
+          isGenerating={isGenerating}
+          liveProgress={liveProgress}
+          liveError={liveError}
+          onSend={handleSend}
+          onAbort={handleAbort}
+          onNewConversation={handleNewConversation}
+          reasoningLevel={reasoningLevel}
+          onReasoningLevelChange={setReasoningLevel}
+        />
+      </div>
+
+      {/* Right: Report panel (or empty state) */}
+      <div style={{
+        flex: 1,
+        overflow: "hidden",
+        display: "flex",
+      }}>
+        {currentReport ? (
+          <ReportView
+            data={currentReport}
+            traceData={currentTraceData}
+            onBack={handleNewConversation}
+            publishedSlug={null}
+          />
+        ) : (
+          <div style={{
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "#8a8ca5",
+            fontFamily: "'Inter', 'Helvetica Neue', system-ui, sans-serif",
+          }}>
+            <div style={{ fontSize: 48, fontWeight: 800, letterSpacing: -2, color: "#1a1a2e", marginBottom: 8 }}>
+              Doubly<span style={{ color: "#b45309" }}>AI</span>
             </div>
-            <div style={{ fontSize: 13, color: "#555770" }}>
-              {typeof error === "string" ? error : error?.message}
-            </div>
-            {error?.detail && (
-              <pre
-                style={{
-                  marginTop: 8,
-                  padding: "10px 12px",
-                  background: "#f8f8fa",
-                  border: "1px solid #e2e4ea",
-                  borderRadius: 4,
-                  fontSize: 11,
-                  color: "#333",
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-word",
-                  maxHeight: 200,
-                  overflow: "auto",
-                  fontFamily: "monospace",
-                }}
-              >
-                {JSON.stringify(error.detail, null, 2)}
-              </pre>
+            <p style={{ fontSize: 14, fontWeight: 500, maxWidth: 400, textAlign: "center", lineHeight: 1.6 }}>
+              {isGenerating
+                ? "Generating your research report..."
+                : "Start a conversation to generate an interactive research report. Ask follow-up questions to refine it."}
+            </p>
+            {isGenerating && (
+              <div style={{
+                marginTop: 24,
+                width: 200,
+                height: 2,
+                background: "#e2e4ea",
+                borderRadius: 1,
+                overflow: "hidden",
+              }}>
+                <div style={{
+                  height: "100%",
+                  width: `${liveProgress.length > 0 ? liveProgress[liveProgress.length - 1].percent : 5}%`,
+                  background: "linear-gradient(90deg, #6366f1, #0891b2, #059669, #d97706)",
+                  backgroundSize: "400% 100%",
+                  transition: "width 0.5s ease",
+                }} />
+              </div>
             )}
-            <button
-              onClick={handleReset}
-              style={{
-                marginTop: 12,
-                padding: "6px 16px",
-                fontSize: 12,
-                fontWeight: 600,
-                border: "1px solid #e2e4ea",
-                borderRadius: 4,
-                background: "#fff",
-                cursor: "pointer",
-                color: "#1a1a2e",
-              }}
-            >
-              Try Again
-            </button>
           </div>
-        </>
-      )}
+        )}
+      </div>
     </div>
   );
 }

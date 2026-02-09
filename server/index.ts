@@ -188,6 +188,99 @@ app.post("/api/generate", rateLimit, async (req: Request, res: Response) => {
   }
 });
 
+// ── SSE endpoint: chat-based report generation ──────────────────────────────
+
+app.post("/api/chat", rateLimit, async (req: Request, res: Response) => {
+  const { query, conversationId, messageHistory, previousReport, reasoningLevel } = req.body as {
+    query: unknown;
+    conversationId?: string;
+    messageHistory?: Array<{ role: string; content: string }>;
+    previousReport?: Report | null;
+    reasoningLevel?: string;
+  };
+
+  // Input validation
+  if (!query || typeof query !== "string" || query.trim().length < 3) {
+    return res.status(400).json({ error: "Query must be at least 3 characters" });
+  }
+  if ((query as string).length > MAX_QUERY_LENGTH) {
+    return res.status(400).json({ error: `Query too long (max ${MAX_QUERY_LENGTH} chars)` });
+  }
+
+  // Set up SSE
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+    "X-Content-Type-Options": "nosniff",
+  });
+
+  let aborted = false;
+  req.on("aborted", () => {
+    aborted = true;
+  });
+  res.on("close", () => {
+    if (!res.writableEnded) aborted = true;
+  });
+
+  const send: SendFn = (event: string, data: unknown): void => {
+    if (!aborted && !res.writableEnded) {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    }
+  };
+
+  const heartbeat = setInterval(() => {
+    if (!aborted && !res.writableEnded) {
+      res.write(": heartbeat\n\n");
+    }
+  }, 15_000);
+
+  try {
+    const conversationContext = {
+      conversationId: conversationId || "unknown",
+      previousReport: previousReport || null,
+      messageHistory: Array.isArray(messageHistory)
+        ? messageHistory.slice(-10)
+        : [],
+    };
+
+    await runPipeline(query.trim(), send, () => aborted, reasoningLevel, conversationContext);
+    if (!aborted) send("done", { success: true });
+  } catch (thrown) {
+    const err = thrown as PipelineError;
+    console.error("Pipeline error:", err);
+    if (!aborted) {
+      const detail = {
+        message: err.message || "Unknown error",
+        stage: err.stage || "unknown",
+        status: err.status || null,
+        type: err.constructor?.name || "Error",
+        rawOutputPreview: err.rawOutput ? err.rawOutput.slice(0, 500) + (err.rawOutput.length > 500 ? "..." : "") : null,
+        stopReason: err.agentTrace?.response?.stop_reason || null,
+        tokenUsage: err.agentTrace?.response?.usage || null,
+        durationMs: err.agentTrace?.timing?.durationMs || null,
+      };
+
+      const safeMessage =
+        err.keyMissing
+          ? "ANTHROPIC_API_KEY is not set. Configure it on the server to enable report generation."
+          : err.status === 401 || err.status === 403
+          ? `ANTHROPIC_API_KEY was rejected by the API (HTTP ${err.status}). Check that it is valid.`
+          : err.status === 429
+          ? `Rate limit hit during ${err.stage || "pipeline"} stage. Please wait a minute and try again.`
+          : err.status && err.status >= 500
+          ? `Upstream API error (HTTP ${err.status}). Please try again shortly.`
+          : `Pipeline failed: ${err.message || "Unknown error"}`;
+
+      send("error", { message: safeMessage, detail });
+    }
+  } finally {
+    clearInterval(heartbeat);
+    if (!res.writableEnded) res.end();
+  }
+});
+
 // ── Publish / retrieve reports ──────────────────────────────────────────────
 
 app.post("/api/reports/publish", async (req: Request, res: Response) => {

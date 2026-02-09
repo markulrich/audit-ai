@@ -51,6 +51,13 @@ interface Report {
   findings: unknown[];
 }
 
+// Helper: type a query into the ChatPanel textarea and submit
+async function submitQuery(user: ReturnType<typeof userEvent.setup>, queryText: string) {
+  // The ChatPanel has example chip buttons — click one to submit
+  const chip = screen.getByRole("button", { name: queryText });
+  await user.click(chip);
+}
+
 describe("App SSE parsing", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -83,7 +90,7 @@ describe("App SSE parsing", () => {
 
     render(<App />);
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Analyze NVIDIA (NVDA)" }));
+    await submitQuery(user, "Analyze NVIDIA (NVDA)");
 
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "NVIDIA (NVDA)" })).toBeInTheDocument();
@@ -121,7 +128,7 @@ describe("App SSE parsing", () => {
 
     render(<App />);
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Analyze NVIDIA (NVDA)" }));
+    await submitQuery(user, "Analyze NVIDIA (NVDA)");
 
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "NVIDIA (NVDA)" })).toBeInTheDocument();
@@ -155,7 +162,7 @@ describe("App SSE parsing", () => {
 
     render(<App />);
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Analyze NVIDIA (NVDA)" }));
+    await submitQuery(user, "Analyze NVIDIA (NVDA)");
 
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "NVIDIA (NVDA)" })).toBeInTheDocument();
@@ -186,14 +193,14 @@ describe("App SSE parsing", () => {
 
     render(<App />);
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Analyze NVIDIA (NVDA)" }));
+    await submitQuery(user, "Analyze NVIDIA (NVDA)");
 
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "NVIDIA (NVDA)" })).toBeInTheDocument();
     });
   });
 
-  it("shows backend error when stream contains progress then error", async () => {
+  it("shows error message when stream contains progress then error", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
@@ -208,13 +215,11 @@ describe("App SSE parsing", () => {
 
     render(<App />);
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Analyze NVIDIA (NVDA)" }));
+    await submitQuery(user, "Analyze NVIDIA (NVDA)");
 
     await waitFor(() => {
-      expect(screen.getByText("Generation Failed")).toBeInTheDocument();
+      const matches = screen.getAllByText("Report generation failed. Please try a different query.");
+      expect(matches.length).toBeGreaterThanOrEqual(1);
     });
-    expect(
-      screen.getByText("Report generation failed. Please try a different query.")
-    ).toBeInTheDocument();
   });
 });
