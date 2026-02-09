@@ -12,6 +12,7 @@ import { COLORS, getCertaintyColor } from "./shared/certainty-utils";
 import { useIsMobile } from "./shared/useIsMobile";
 import CertaintyBadge from "./shared/CertaintyBadge";
 import ExplanationPanel from "./shared/ExplanationPanel";
+import ExportMenu from "./shared/ExportMenu";
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
 
@@ -67,6 +68,7 @@ function FindingSpan({ finding, isActive, onActivate }: FindingSpanProps) {
 // ─── Section title prettifier ──────────────────────────────────────────────────
 
 const SECTION_TITLES: Record<string, string> = {
+  // Equity research
   investment_thesis: "Investment Thesis",
   thesis: "Investment Thesis",
   recent_price_action: "Recent Price Action",
@@ -83,7 +85,18 @@ const SECTION_TITLES: Record<string, string> = {
   risks: "Key Risks",
   analyst_consensus: "Analyst Consensus",
   consensus: "Analyst Consensus",
+  // Pitch deck
+  title_slide: "Overview",
+  problem: "The Problem",
+  solution: "Our Solution",
+  market_opportunity: "Market Opportunity",
+  business_model: "Business Model",
+  traction: "Traction & Milestones",
+  team: "Team",
+  the_ask: "The Ask",
 };
+
+const PITCH_DECK_SECTION_IDS = new Set(["title_slide", "problem", "solution", "market_opportunity", "business_model", "traction", "the_ask"]);
 
 // ─── Prop Interfaces ────────────────────────────────────────────────────────────
 
@@ -96,11 +109,12 @@ interface ReportProps {
   slug?: string | null;
   saveState?: SaveState;
   onRetrySave?: () => void;
+  onToggleView?: () => void;
 }
 
 // ─── Main Report Component ─────────────────────────────────────────────────────
 
-export default function Report({ data, traceData, onBack, slug, saveState, onRetrySave }: ReportProps) {
+export default function Report({ data, traceData, onBack, slug, saveState, onRetrySave, onToggleView }: ReportProps) {
   const [activeId, setActiveId] = useState<string>("overview");
   const [showPanel, setShowPanel] = useState<boolean>(false); // for mobile panel toggle
   const [showDetails, setShowDetails] = useState<boolean>(false);
@@ -178,8 +192,16 @@ export default function Report({ data, traceData, onBack, slug, saveState, onRet
   const overallColor = getCertaintyColor(overallCertainty);
   const keyStats: KeyStat[] = meta?.keyStats || [];
 
-  // Filter sections that have at least one valid finding
+  // Detect domain from section IDs for domain-aware rendering
+  const isPitchDeck = useMemo(() =>
+    safeSections.some((s) => PITCH_DECK_SECTION_IDS.has(s.id)) || !!meta?.fundingAsk,
+    [safeSections, meta?.fundingAsk]
+  );
+  const domainLabel = isPitchDeck ? "AI-Generated Pitch Deck Analysis" : "AI-Generated Equity Research";
+
+  // Filter sections that have at least one valid finding, or are title_slide (which has text-only content)
   const visibleSections = useMemo<Section[]>(() => safeSections.filter((s) =>
+    s.id === "title_slide" ||
     (s.content || []).some((item) => item.type === "finding" && findingsMap[(item as { id: string }).id])
   ), [safeSections, findingsMap]);
 
@@ -261,6 +283,25 @@ export default function Report({ data, traceData, onBack, slug, saveState, onRet
                 Report Details
               </button>
             )}
+            {onToggleView && (
+              <button
+                onClick={onToggleView}
+                aria-label="View as slide deck"
+                style={{
+                  padding: "4px 12px",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  border: `1px solid ${COLORS.border}`,
+                  borderRadius: 4,
+                  background: "#fff",
+                  color: COLORS.textSecondary,
+                  cursor: "pointer",
+                }}
+              >
+                View as Slides
+              </button>
+            )}
+            <ExportMenu defaultFormat="pdf" theme="light" />
             {/* Save status + copy link */}
             <span
               style={{
@@ -370,7 +411,7 @@ export default function Report({ data, traceData, onBack, slug, saveState, onRet
                   color: COLORS.textMuted,
                 }}
               >
-                AI-Generated Equity Research
+                {domainLabel}
               </span>
               <CertaintyBadge value={overallCertainty} large />
             </div>
@@ -407,14 +448,20 @@ export default function Report({ data, traceData, onBack, slug, saveState, onRet
                     marginBottom: 4,
                   }}
                 >
-                  {meta?.subtitle || "Equity Research"}
+                  {meta?.subtitle || (isPitchDeck ? "Pitch Deck Analysis" : "Equity Research")}
                 </div>
                 <h1 style={{ fontSize: isMobile ? 20 : 26, fontWeight: 800, margin: "0 0 2px", letterSpacing: -0.5, color: COLORS.accent }}>
                   {meta?.title || "Research Report"}
                 </h1>
-                <div style={{ fontSize: 13, color: COLORS.textSecondary }}>
-                  {meta?.exchange}: {meta?.ticker} · {meta?.sector}
-                </div>
+                {meta?.exchange || meta?.ticker || meta?.sector ? (
+                  <div style={{ fontSize: 13, color: COLORS.textSecondary }}>
+                    {[meta?.exchange, meta?.ticker].filter(Boolean).join(": ")}{meta?.sector ? ` · ${meta.sector}` : ""}
+                  </div>
+                ) : meta?.tagline ? (
+                  <div style={{ fontSize: 13, color: COLORS.textSecondary }}>
+                    {meta.tagline}
+                  </div>
+                ) : null}
               </div>
               <div style={{ textAlign: "right" }}>
                 <div
