@@ -18,6 +18,7 @@ const FORMATS: Record<ExportFormat, { label: string; icon: string }> = {
 
 export default function ExportMenu({ defaultFormat, onExport, theme = "light" }: ExportMenuProps) {
   const [open, setOpen] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const hoverTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -63,8 +64,16 @@ export default function ExportMenu({ defaultFormat, onExport, theme = "light" }:
 
   const handleExport = useCallback((format: ExportFormat) => {
     setOpen(false);
+    setToast(`${FORMATS[format].label} is not yet implemented`);
     onExport(format);
   }, [onExport]);
+
+  // Auto-dismiss toast after 3s
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 3000);
+    return () => clearTimeout(timer);
+  }, [toast]);
 
   return (
     <div
@@ -161,11 +170,30 @@ export default function ExportMenu({ defaultFormat, onExport, theme = "light" }:
               )}
             </button>
           ))}
-          <div style={{ padding: "6px 14px", borderTop: `1px solid ${borderColor}` }}>
-            <span style={{ fontSize: 10, color: textDim, lineHeight: 1.4 }}>
-              Export functionality coming soon
-            </span>
-          </div>
+        </div>
+      )}
+
+      {toast && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            position: "fixed",
+            bottom: 24,
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: isDark ? "#2a2a40" : "#1a1a2e",
+            color: "#fff",
+            padding: "10px 20px",
+            borderRadius: 8,
+            fontSize: 13,
+            fontWeight: 500,
+            boxShadow: "0 4px 20px rgba(0,0,0,0.25)",
+            zIndex: 9999,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {toast}
         </div>
       )}
     </div>
