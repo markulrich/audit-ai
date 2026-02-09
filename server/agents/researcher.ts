@@ -25,6 +25,7 @@ export async function research(
 ): Promise<AgentResult<EvidenceItem[]>> {
   const { ticker, companyName, focusAreas } = domainProfile;
   const evidenceMin = config.evidenceMinItems || 40;
+  const quoteLength = config.quoteLength || "1-2 sentences with key data points";
 
   const params = {
     ...(config.researcherModel && { model: config.researcherModel }),
@@ -48,8 +49,8 @@ SOURCE HIERARCHY (most to least authoritative):
 
 FOR EACH EVIDENCE ITEM, PROVIDE:
 - source: The publication or data provider name (e.g., "NVIDIA Newsroom (Official)", "Seeking Alpha", "Goldman Sachs")
-- quote: An exact or near-exact quote or data point. Be VERY specific with numbers, dates, and percentages. This will be displayed to the user as the primary evidence.
-- url: The domain name only, NOT a full URL (e.g., "nvidianews.nvidia.com", "sec.gov", "seekingalpha.com"). For general industry knowledge use "general". For data derived from multiple unnamed sources use "various".
+- quote: An exact or near-exact quote or data point (${quoteLength}). Be VERY specific with numbers, dates, and percentages. This will be displayed to the user as the primary evidence.
+- url: A full, specific URL that would plausibly link to the actual source page (e.g., "https://nvidianews.nvidia.com/news/nvidia-financial-results-q4-fiscal-2025", "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001045810&type=10-K", "https://seekingalpha.com/article/nvidia-earnings-analysis"). Construct realistic URLs using the source's known URL patterns. For general industry knowledge use "general". For data derived from multiple unnamed sources use "various".
 - category: One of [financial_data, market_data, analyst_opinion, product_news, competitive_intel, risk_factor, macro_trend]
 - authority: One of [official_filing, company_announcement, analyst_estimate, industry_report, press_coverage]
 

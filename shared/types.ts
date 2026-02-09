@@ -124,6 +124,7 @@ export interface ReasoningConfig {
   findingsPerSection: string;
   supportingEvidenceMin: number;
   explanationLength: string;
+  quoteLength: string;
   keyStatsCount: number;
   methodologyLength: string;
   methodologySources: string;

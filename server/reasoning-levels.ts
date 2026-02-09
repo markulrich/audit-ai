@@ -28,6 +28,7 @@ export const REASONING_LEVELS: Record<string, ReasoningConfig> = {
     findingsPerSection: "1",
     supportingEvidenceMin: 1,
     explanationLength: "1 sentence",
+    quoteLength: "1-2 sentences — brief and factual",
     keyStatsCount: 2,
 
     // Verifier
@@ -51,6 +52,7 @@ export const REASONING_LEVELS: Record<string, ReasoningConfig> = {
     findingsPerSection: "2-3",
     supportingEvidenceMin: 2,
     explanationLength: "1-2 sentences",
+    quoteLength: "1-2 sentences with key data points",
     keyStatsCount: 4,
 
     methodologyLength: "2-3 sentences",
@@ -73,6 +75,7 @@ export const REASONING_LEVELS: Record<string, ReasoningConfig> = {
     findingsPerSection: "3-5",
     supportingEvidenceMin: 3,
     explanationLength: "2-4 sentences",
+    quoteLength: "2-4 sentences — include full context, surrounding data points, and methodology details when available",
     keyStatsCount: 6,
 
     methodologyLength: "3-5 sentences",
@@ -95,6 +98,7 @@ export const REASONING_LEVELS: Record<string, ReasoningConfig> = {
     findingsPerSection: "4-7",
     supportingEvidenceMin: 5,
     explanationLength: "3-6 sentences",
+    quoteLength: "3-6 sentences — provide extensive verbatim quotes with full surrounding context, complete data tables or breakdowns when available, and detailed methodology descriptions",
     keyStatsCount: 8,
 
     methodologyLength: "5-8 sentences",
