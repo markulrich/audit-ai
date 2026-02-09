@@ -17,6 +17,14 @@ const mockedTracedCreate = tracedCreate as Mock;
 const domainProfile = {
   ticker: "TEST",
   companyName: "Test Corp",
+  outputFormat: "written_report",
+} as DomainProfile;
+
+const slideDeckProfile = {
+  ticker: "N/A",
+  companyName: "AI Startup",
+  domain: "pitch_deck",
+  outputFormat: "slide_deck",
 } as DomainProfile;
 
 const evidence: EvidenceItem[] = [
@@ -83,7 +91,7 @@ function mockEmptyResponse(): void {
 // ---------------------------------------------------------------------------
 
 beforeEach(() => {
-  vi.restoreAllMocks();
+  vi.clearAllMocks();
 });
 
 describe("synthesizer agent", () => {
@@ -161,6 +169,34 @@ describe("synthesizer agent", () => {
       // Repair closes the braces: {"meta": {}} — valid JSON
       const { result } = await synthesize("test query", domainProfile, evidence, undefined);
       expect(result.meta).toBeDefined();
+    });
+  });
+
+  // ── Slide deck format ───────────────────────────────────────────────────
+
+  describe("slide deck format", () => {
+    function makeSlideProfile(): DomainProfile {
+      return { ticker: "N/A", companyName: "AI Startup", domain: "pitch_deck", outputFormat: "slide_deck", domainLabel: "Pitch Deck", defaultOutputFormat: "slide_deck", sourceHierarchy: [], certaintyRubric: "", evidenceStyle: "", contraryThreshold: "", toneTemplate: "", sections: [], reportMeta: { ratingOptions: [] }, focusAreas: [], timeframe: "current" } as DomainProfile;
+    }
+
+    it("uses slide deck prompt when outputFormat is slide_deck", async () => {
+      const slideReport = makeReport();
+      slideReport.meta.outputFormat = "slide_deck";
+      mockAiResponse(JSON.stringify(slideReport));
+
+      await synthesize("pitch deck for startup", makeSlideProfile(), evidence, undefined);
+
+      const callArgs = mockedTracedCreate.mock.calls[0][0];
+      expect(callArgs.system).toContain("slide deck");
+    });
+
+    it("includes outputFormat in trace parsedOutput", async () => {
+      const slideReport = makeReport();
+      mockAiResponse(JSON.stringify(slideReport));
+
+      const { trace } = await synthesize("pitch deck for startup", makeSlideProfile(), evidence, undefined);
+      expect((trace as Record<string, unknown>).parsedOutput).toBeDefined();
+      expect(((trace as Record<string, unknown>).parsedOutput as Record<string, unknown>).outputFormat).toBe("slide_deck");
     });
   });
 });

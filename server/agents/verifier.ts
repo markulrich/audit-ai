@@ -17,6 +17,9 @@ import type {
  * Removes finding references from section content arrays when the finding
  * has been deleted (e.g., certainty < 25%). Also collapses adjacent text nodes
  * and removes sections that have no findings left.
+ *
+ * Preserves title_slide sections even if they have no findings (they typically
+ * have text-only content in slide deck format).
  */
 function cleanOrphanedRefs(report: Report): void {
   const findingIds = new Set((report.findings || []).map((f) => f.id));
@@ -40,8 +43,9 @@ function cleanOrphanedRefs(report: Report): void {
     section.content = cleaned;
   }
 
-  // Remove sections that have zero findings
+  // Remove sections that have zero findings, but preserve title_slide sections
   report.sections = (report.sections || []).filter((s) =>
+    s.id === "title_slide" ||
     (s.content || []).some((item) => item.type === "finding")
   );
 }
@@ -67,6 +71,9 @@ export async function verify(
   const methodologySources = config.methodologySources || "3-4";
   const removalThreshold = config.removalThreshold ?? 25;
 
+  const isSlides = domainProfile.outputFormat === "slide_deck";
+  const formatLabel = isSlides ? "slide deck" : "equity research report";
+
   // Build conversation context for follow-ups
   let contextSection = "";
   if (conversationContext?.previousReport) {
@@ -85,12 +92,22 @@ ${recentMessages}
 Pay special attention to areas the user mentioned — they may have flagged specific concerns.`;
   }
 
+  const slideFieldInstruction = isSlides
+    ? `
+IMPORTANT: This is a slide deck. You MUST preserve these slide-specific fields on each section:
+- "layout": the slide layout type (title, content, two-column, stats, bullets)
+- "subtitle": the slide subtitle text
+- "speakerNotes": presenter notes for the slide
+Do NOT remove or modify these fields.
+`
+    : "";
+
   const params = {
     ...(config.verifierModel && { model: config.verifierModel }),
-    system: `You are an adversarial fact-checker reviewing a draft equity research report on ${companyName} (${ticker}).
+    system: `You are an adversarial fact-checker reviewing a draft ${formatLabel} on ${companyName} (${ticker}).
 
 Be skeptical. Challenge every claim. Your job is to catch errors before they reach the client.
-${contextSection}
+${contextSection}${slideFieldInstruction}
 For each finding:
 1. Verify factual accuracy against your knowledge
 2. Add contradicting evidence or caveats as "contraryEvidence"
@@ -120,7 +137,7 @@ Return complete report JSON. No markdown fences.`,
     messages: [
       {
         role: "user" as const,
-        content: `Review this draft report on ${companyName} (${ticker}). Be skeptical — find errors, weak claims, and missing caveats.\n\n${JSON.stringify(draft, null, 2)}`,
+        content: `Review this draft ${formatLabel} on ${companyName} (${ticker}). Be skeptical — find errors, weak claims, and missing caveats.\n\n${JSON.stringify(draft, null, 2)}`,
       },
     ],
   };
