@@ -114,10 +114,10 @@ This is the most important section of this file. The Report.jsx component reads 
     "title": "Short Title (2-5 words)",
     "text": "2-4 sentences of context and significance",
     "supportingEvidence": [                  // ← INSIDE explanation
-      { "source": "NVIDIA Newsroom (Official)", "quote": "Exact quote or data point", "url": "nvidianews.nvidia.com" }
+      { "source": "NVIDIA Newsroom (Official)", "quote": "Exact quote or data point", "url": "https://nvidianews.nvidia.com/news/nvidia-financial-results-q4-fiscal-2025" }
     ],
     "contraryEvidence": [                    // ← INSIDE explanation (same level as supportingEvidence)
-      { "source": "Source Name", "quote": "Contradicting data or caveat", "url": "domain.com" }
+      { "source": "Source Name", "quote": "Contradicting data or caveat", "url": "https://example.com/full/path/to/source" }
     ]
   }
 }
@@ -138,13 +138,13 @@ This is the most important section of this file. The Report.jsx component reads 
 
 ### URL conventions in evidence items:
 
-- Regular sources: domain name only (e.g., `"sec.gov"`, `"seekingalpha.com"`)
+- Regular sources: full URL (e.g., `"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001045810&type=10-K"`, `"https://seekingalpha.com/article/nvidia-earnings-analysis"`)
 - General knowledge: `"general"`
 - Multiple sources: `"various"`
 - Calculated/derived: `"derived"`
 - Internal methodology: `"internal"`
 
-Report.jsx filters out "general", "various", "derived", and "internal" from displaying the source link.
+Report.tsx renders full URLs as clickable links (displaying just the hostname). It filters out "general", "various", "derived", and "internal" from displaying any source link.
 
 ### Content array item types:
 
