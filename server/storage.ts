@@ -188,8 +188,15 @@ export async function listReports(): Promise<SlugMeta[]> {
 // ── Health check ────────────────────────────────────────────────────────────────
 
 export async function checkS3Health(): Promise<{ ok: boolean; bucket: string | undefined; endpoint: string | undefined; error?: string }> {
-  if (!BUCKET) return { ok: false, bucket: BUCKET, endpoint: S3_ENDPOINT, error: "BUCKET_NAME is not set" };
-  if (!S3_ENDPOINT) return { ok: false, bucket: BUCKET, endpoint: S3_ENDPOINT, error: "AWS_ENDPOINT_URL_S3 is not set" };
+  const missing: string[] = [];
+  if (!BUCKET) missing.push("BUCKET_NAME");
+  if (!S3_ENDPOINT) missing.push("AWS_ENDPOINT_URL_S3");
+  if (!process.env.AWS_ACCESS_KEY_ID) missing.push("AWS_ACCESS_KEY_ID");
+  if (!process.env.AWS_SECRET_ACCESS_KEY) missing.push("AWS_SECRET_ACCESS_KEY");
+
+  if (missing.length > 0) {
+    return { ok: false, bucket: BUCKET, endpoint: S3_ENDPOINT, error: `Missing env vars: ${missing.join(", ")}. Run \`fly storage create\` or set them manually.` };
+  }
 
   try {
     await s3.send(new HeadBucketCommand({ Bucket: BUCKET }));
