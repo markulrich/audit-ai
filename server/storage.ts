@@ -12,7 +12,7 @@
  */
 
 import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command, HeadBucketCommand } from "@aws-sdk/client-s3";
-import type { Report, ChatMessage } from "../shared/types";
+import type { Report, ChatMessage, ReportJob } from "../shared/types";
 
 // ── S3 client ─────────────────────────────────────────────────────────────────
 
@@ -204,6 +204,20 @@ export async function listReports(): Promise<SlugMeta[]> {
   // Sort by most recently updated first
   metas.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
   return metas;
+}
+
+// ── Job State Persistence ─────────────────────────────────────────────────────
+
+/** Persist a job's state to S3 for recovery across server restarts */
+export async function putJobState(jobId: string, job: ReportJob): Promise<void> {
+  // Store a serializable snapshot (omit transient fields like listenerCount)
+  const { listenerCount, ...persistable } = job;
+  await putObject(`jobs/${jobId}/state.json`, persistable);
+}
+
+/** Load a job's state from S3 */
+export async function getJobState(jobId: string): Promise<ReportJob | null> {
+  return getObject<ReportJob>(`jobs/${jobId}/state.json`);
 }
 
 // ── Health check ────────────────────────────────────────────────────────────────

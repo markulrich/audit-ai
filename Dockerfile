@@ -16,5 +16,9 @@ RUN npm run build
 
 ENV NODE_ENV=production
 EXPOSE 3001
+EXPOSE 8080
 
-CMD ["node", "--import", "tsx", "server/index.ts"]
+# Entrypoint selects between main server and worker modes.
+# When WORKER_MODE=true, the machine runs the worker agent process.
+# Otherwise, it runs the main control plane server.
+CMD ["sh", "-c", "if [ \"$WORKER_MODE\" = \"true\" ]; then node --import tsx server/worker.ts; else node --import tsx server/index.ts; fi"]

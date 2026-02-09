@@ -288,3 +288,105 @@ export interface ConversationContext {
   previousReport?: Report | null;
   messageHistory?: Array<{ role: string; content: string }>;
 }
+
+// ── Attachments ────────────────────────────────────────────────────────────
+
+export interface Attachment {
+  id: string;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  s3Key: string;
+  uploadedAt: string;
+  /** Text content extracted from the file (PDF text, CSV parsed, etc.) */
+  extractedText?: string;
+  /** Preview URL (signed S3 URL or data URI for images) */
+  previewUrl?: string;
+}
+
+// ── Skills System ──────────────────────────────────────────────────────────
+
+export type SkillName =
+  | "classify"
+  | "research"
+  | "analyze_attachment"
+  | "synthesize"
+  | "verify"
+  | "refine_section"
+  | "draft_answer";
+
+export interface SkillInvocation {
+  skill: SkillName;
+  input: Record<string, unknown>;
+  startedAt: string;
+  completedAt?: string;
+  durationMs?: number;
+  status: "running" | "completed" | "failed";
+  output?: unknown;
+  error?: string;
+  trace?: TraceData;
+}
+
+// ── Agent Work Log ─────────────────────────────────────────────────────────
+
+export interface AgentPlanStep {
+  skill: SkillName;
+  description: string;
+  input: Record<string, unknown>;
+  status: "pending" | "running" | "completed" | "failed";
+}
+
+export interface AgentWorkLog {
+  plan: AgentPlanStep[];
+  invocations: SkillInvocation[];
+  reasoning: string[];
+}
+
+// ── Report Job ─────────────────────────────────────────────────────────────
+
+export type JobStatus = "queued" | "running" | "completed" | "failed";
+
+export interface ReportJob {
+  jobId: string;
+  slug: string;
+  status: JobStatus;
+  query: string;
+  reasoningLevel: string;
+  attachments: Attachment[];
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  /** Current progress events (append-only during run) */
+  progress: ProgressEvent[];
+  /** Trace events from skill invocations */
+  traceEvents: TraceEvent[];
+  /** The agent's work log showing planning and skill usage */
+  workLog: AgentWorkLog;
+  /** The current report (updated as skills complete) */
+  currentReport?: Report | null;
+  /** Domain profile once classified */
+  domainProfile?: DomainProfile | null;
+  /** Conversation context for follow-ups */
+  conversationContext?: ConversationContext;
+  /** Error if job failed */
+  error?: ErrorInfo | null;
+  /** Number of SSE listeners currently connected */
+  listenerCount?: number;
+  /** Dedicated machine ID (when running on a per-report Fly Machine) */
+  machineId?: string;
+  /** Machine region */
+  machineRegion?: string;
+}
+
+export interface ReportJobSummary {
+  jobId: string;
+  slug: string;
+  status: JobStatus;
+  query: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  progress: number;
+  attachmentCount: number;
+  hasReport: boolean;
+}

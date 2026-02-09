@@ -12,14 +12,52 @@ import type { Request, Response, NextFunction } from "express";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { runPipeline } from "./pipeline";
+import { runOrchestrator } from "./orchestrator";
 import { saveReport, getReport, listReports, generateSlugFromProfile } from "./storage";
 import { getHealthStatus } from "./health";
 import { classifyDomain } from "./agents/classifier";
 import { getReasoningConfig } from "./reasoning-levels";
+import {
+  createJob,
+  getJob,
+  getLatestJobForSlug,
+  startJob,
+  completeJob,
+  failJob,
+  createJobSendFn,
+  subscribeToJob,
+  addAttachmentToJob,
+  removeAttachmentFromJob,
+  updateWorkLog,
+  listJobs,
+  summarizeJob,
+} from "./jobs";
+import {
+  validateUpload,
+  uploadAttachment,
+  deleteAttachment,
+} from "./attachments";
+import {
+  isMachinesAvailable,
+  createMachine,
+  waitForMachineReady,
+  trackMachine,
+  getMachineForJob,
+  destroyMachine,
+} from "./machines";
 
 import "./anthropic-client";
 
-import type { PipelineError, SendFn, Report, ChatMessage, DomainProfile, TraceData } from "../shared/types";
+import type {
+  PipelineError,
+  SendFn,
+  Report,
+  ChatMessage,
+  DomainProfile,
+  TraceData,
+  Attachment,
+  ErrorInfo,
+} from "../shared/types";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -30,6 +68,9 @@ const MAX_QUERY_LENGTH = 5000;
 // ── Middleware ───────────────────────────────────────────────────────────────
 
 app.use(express.json({ limit: "100kb" }));
+
+// Raw body parsing for attachment uploads (up to 20MB)
+app.use("/api/reports/:slug/attachments", express.raw({ type: "*/*", limit: "20mb" }));
 
 // Request logging
 app.use((req, res, next) => {
@@ -143,6 +184,469 @@ app.post("/api/classify", rateLimit, async (req: Request, res: Response) => {
   }
 });
 
+// ══════════════════════════════════════════════════════════════════════════════
+// NEW: Job-based report generation (background processing with agent skills)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── Create a new report job ──────────────────────────────────────────────────
+
+app.post("/api/jobs", rateLimit, async (req: Request, res: Response) => {
+  const {
+    query,
+    slug,
+    reasoningLevel,
+    conversationId,
+    messageHistory,
+    previousReport,
+    domainProfile: reqDomainProfile,
+    classifierTrace: reqClassifierTrace,
+  } = req.body as {
+    query: unknown;
+    slug?: string;
+    reasoningLevel?: string;
+    conversationId?: string;
+    messageHistory?: Array<{ role: string; content: string }>;
+    previousReport?: Report | null;
+    domainProfile?: DomainProfile;
+    classifierTrace?: TraceData;
+  };
+
+  if (!query || typeof query !== "string" || query.trim().length < 3) {
+    return res.status(400).json({ error: "Query must be at least 3 characters" });
+  }
+  if ((query as string).length > MAX_QUERY_LENGTH) {
+    return res.status(400).json({ error: `Query too long (max ${MAX_QUERY_LENGTH} chars)` });
+  }
+
+  // Use provided slug or generate one
+  const reportSlug = slug || `report-${Date.now().toString(36)}`;
+
+  const conversationContext = conversationId
+    ? {
+        conversationId,
+        previousReport: previousReport || null,
+        messageHistory: Array.isArray(messageHistory) ? messageHistory.slice(-10) : [],
+      }
+    : undefined;
+
+  const preClassified = reqDomainProfile
+    ? { domainProfile: reqDomainProfile, trace: reqClassifierTrace || {} }
+    : undefined;
+
+  // Create the job
+  const job = createJob({
+    slug: reportSlug,
+    query: (query as string).trim(),
+    reasoningLevel: reasoningLevel || "x-light",
+    conversationContext,
+  });
+
+  // Start the job in the background (does NOT block the response)
+  runJobInBackground(job.jobId, preClassified);
+
+  res.status(201).json({
+    jobId: job.jobId,
+    slug: reportSlug,
+    status: job.status,
+  });
+});
+
+/**
+ * Run a job in the background.
+ *
+ * Strategy:
+ * 1. If FLY_API_TOKEN is set → spin up a dedicated Fly Machine (per-report isolation)
+ * 2. Otherwise → run the agent orchestrator in-process (development mode)
+ *
+ * Machine-based execution:
+ *   - Creates a new Fly Machine with the same Docker image
+ *   - Passes JOB_ID and WORKER_MODE=true as env vars
+ *   - The machine runs server/worker.ts which has a Claude tool_use agent loop
+ *   - Progress is persisted to S3; the main server polls for updates
+ *   - Machine auto-stops when the report is complete
+ */
+async function runJobInBackground(
+  jobId: string,
+  preClassified?: { domainProfile: DomainProfile; trace: TraceData }
+): Promise<void> {
+  const job = await getJob(jobId);
+  if (!job) return;
+
+  // Persist job state to S3 first (worker reads from S3)
+  await startJob(jobId);
+
+  // Try machine-based execution first
+  if (isMachinesAvailable()) {
+    try {
+      await runJobOnMachine(jobId, job.slug);
+      return;
+    } catch (err) {
+      console.warn(
+        `[job ${jobId}] Machine creation failed, falling back to in-process:`,
+        (err as Error).message
+      );
+      // Fall through to in-process execution
+    }
+  }
+
+  // In-process execution (development mode or machine unavailable)
+  await runJobInProcess(jobId, preClassified);
+}
+
+/** Spin up a Fly Machine for this job */
+async function runJobOnMachine(jobId: string, slug: string): Promise<void> {
+  console.log(`[job ${jobId}] Spinning up dedicated machine...`);
+
+  const send = createJobSendFn(jobId);
+  send("progress", {
+    stage: "provisioning",
+    message: "Spinning up a dedicated machine for your report...",
+    percent: 1,
+  });
+
+  const machine = await createMachine({
+    jobId,
+    slug,
+    env: {},
+  });
+
+  trackMachine(jobId, machine.machineId);
+
+  send("progress", {
+    stage: "provisioned",
+    message: `Machine ${machine.machineId} created in ${machine.region}`,
+    percent: 3,
+    detail: `Dedicated compute allocated. Your report will keep running even if you close this tab.`,
+  });
+
+  // Wait for the machine to be ready
+  try {
+    await waitForMachineReady(machine.machineId, 60_000);
+
+    send("progress", {
+      stage: "machine_ready",
+      message: "Machine ready — agent starting...",
+      percent: 4,
+    });
+
+    // Start polling the machine's progress via S3
+    // The worker writes to S3; we poll and relay to connected clients
+    pollMachineProgress(jobId, machine.machineId);
+  } catch (err) {
+    console.error(`[job ${jobId}] Machine failed to start:`, (err as Error).message);
+    await destroyMachine(machine.machineId);
+    throw err;
+  }
+}
+
+/** Poll a machine's progress from S3 and relay to connected clients */
+async function pollMachineProgress(
+  jobId: string,
+  machineId: string
+): Promise<void> {
+  const send = createJobSendFn(jobId);
+  let lastProgressCount = 0;
+  let lastTraceCount = 0;
+
+  const poll = async () => {
+    try {
+      const { getJobState } = await import("./storage");
+      const jobState = await getJobState(jobId);
+      if (!jobState) return false;
+
+      // Relay new progress events
+      if (jobState.progress && jobState.progress.length > lastProgressCount) {
+        for (let i = lastProgressCount; i < jobState.progress.length; i++) {
+          send("progress", jobState.progress[i]);
+        }
+        lastProgressCount = jobState.progress.length;
+      }
+
+      // Relay new trace events
+      if (jobState.traceEvents && jobState.traceEvents.length > lastTraceCount) {
+        for (let i = lastTraceCount; i < jobState.traceEvents.length; i++) {
+          send("trace", jobState.traceEvents[i]);
+        }
+        lastTraceCount = jobState.traceEvents.length;
+      }
+
+      // Relay work log
+      if (jobState.workLog) {
+        send("work_log", jobState.workLog);
+        updateWorkLog(jobId, jobState.workLog);
+      }
+
+      // Check if done
+      if (jobState.status === "completed" && jobState.currentReport) {
+        await completeJob(jobId, jobState.currentReport);
+        await destroyMachine(machineId);
+        return true; // Stop polling
+      }
+      if (jobState.status === "failed") {
+        await failJob(jobId, jobState.error || { message: "Worker failed" });
+        await destroyMachine(machineId);
+        return true; // Stop polling
+      }
+
+      return false; // Keep polling
+    } catch (err) {
+      console.warn(`[job ${jobId}] Poll error:`, (err as Error).message);
+      return false;
+    }
+  };
+
+  // Poll every 3 seconds
+  const interval = setInterval(async () => {
+    const done = await poll();
+    if (done) {
+      clearInterval(interval);
+    }
+  }, 3000);
+
+  // Safety: stop polling after 30 minutes
+  setTimeout(() => {
+    clearInterval(interval);
+  }, 30 * 60 * 1000);
+}
+
+/** Run the job in-process using the agent orchestrator (no machine) */
+async function runJobInProcess(
+  jobId: string,
+  preClassified?: { domainProfile: DomainProfile; trace: TraceData }
+): Promise<void> {
+  const job = await getJob(jobId);
+  if (!job) return;
+
+  const send = createJobSendFn(jobId);
+
+  try {
+    const report = await runOrchestrator({
+      query: job.query,
+      send,
+      isAborted: () => false, // Jobs don't abort when tab closes
+      reasoningLevel: job.reasoningLevel,
+      conversationContext: job.conversationContext,
+      preClassified,
+      attachments: job.attachments,
+      onProgress: (workLog) => {
+        updateWorkLog(jobId, workLog);
+      },
+    });
+
+    await completeJob(jobId, report);
+
+    // Auto-save the report to S3
+    try {
+      await saveReport(report, job.slug);
+    } catch (err) {
+      console.warn(`[job ${jobId}] Auto-save failed:`, (err as Error).message);
+    }
+  } catch (thrown) {
+    const err = thrown as PipelineError;
+    console.error(`[job ${jobId}] Failed:`, err);
+
+    const safeMessage =
+      err.keyMissing
+        ? "ANTHROPIC_API_KEY is not set."
+        : err.status === 401 || err.status === 403
+        ? `API key rejected (HTTP ${err.status}).`
+        : err.status === 429
+        ? `Rate limit hit during ${err.stage || "pipeline"} stage.`
+        : `Pipeline failed: ${err.message || "Unknown error"}`;
+
+    await failJob(jobId, {
+      message: safeMessage,
+      detail: {
+        message: err.message || "Unknown error",
+        stage: err.stage || "unknown",
+        status: err.status || null,
+        type: err.constructor?.name || "Error",
+      },
+    });
+  }
+}
+
+// ── Get job status ───────────────────────────────────────────────────────────
+
+app.get("/api/jobs/:jobId", async (req: Request, res: Response) => {
+  const job = await getJob(req.params.jobId);
+  if (!job) return res.status(404).json({ error: "Job not found" });
+  res.json(summarizeJob(job));
+});
+
+// ── Get full job state (including report, progress, work log) ────────────────
+
+app.get("/api/jobs/:jobId/full", async (req: Request, res: Response) => {
+  const job = await getJob(req.params.jobId);
+  if (!job) return res.status(404).json({ error: "Job not found" });
+
+  // Return full state (excluding internal fields)
+  const { listenerCount, ...state } = job;
+  res.json(state);
+});
+
+// ── SSE stream for a job (reconnectable) ─────────────────────────────────────
+
+app.get("/api/jobs/:jobId/events", async (req: Request, res: Response) => {
+  const job = await getJob(req.params.jobId);
+  if (!job) return res.status(404).json({ error: "Job not found" });
+
+  // Set up SSE
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+    "X-Content-Type-Options": "nosniff",
+  });
+
+  // Send current state first (replay for reconnecting clients)
+  const replaySend = (event: string, data: unknown) => {
+    if (!res.writableEnded) {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    }
+  };
+
+  // Replay accumulated progress
+  for (const prog of job.progress) {
+    replaySend("progress", prog);
+  }
+  for (const trace of job.traceEvents) {
+    replaySend("trace", trace);
+  }
+  if (job.workLog.plan.length > 0) {
+    replaySend("work_log", job.workLog);
+  }
+  if (job.currentReport) {
+    replaySend("report", job.currentReport);
+  }
+  if (job.error) {
+    replaySend("error", job.error);
+  }
+  if (job.status === "completed") {
+    replaySend("done", { success: true });
+  }
+  if (job.status === "failed") {
+    replaySend("job_status", { status: "failed" });
+  }
+
+  // If job is already done, end the stream
+  if (job.status === "completed" || job.status === "failed") {
+    res.end();
+    return;
+  }
+
+  // Subscribe to live events
+  const unsubscribe = subscribeToJob(job.jobId, (msg) => {
+    if (!res.writableEnded) {
+      res.write(`event: ${msg.event}\ndata: ${JSON.stringify(msg.data)}\n\n`);
+    }
+
+    // Close stream when job completes
+    if (msg.event === "done" || (msg.event === "job_status" && (msg.data as { status: string }).status === "failed")) {
+      setTimeout(() => {
+        if (!res.writableEnded) res.end();
+      }, 100);
+    }
+  });
+
+  // Heartbeat
+  const heartbeat = setInterval(() => {
+    if (!res.writableEnded) {
+      res.write(": heartbeat\n\n");
+    }
+  }, 15_000);
+
+  // Cleanup on disconnect
+  res.on("close", () => {
+    clearInterval(heartbeat);
+    unsubscribe();
+  });
+});
+
+// ── List all jobs ────────────────────────────────────────────────────────────
+
+app.get("/api/jobs", (_req: Request, res: Response) => {
+  res.json({ jobs: listJobs() });
+});
+
+// ── Get the latest job for a report slug ─────────────────────────────────────
+
+app.get("/api/reports/:slug/job", (req: Request, res: Response) => {
+  const job = getLatestJobForSlug(req.params.slug);
+  if (!job) return res.status(404).json({ error: "No job found for this report" });
+  res.json(summarizeJob(job));
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// NEW: Attachments API
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── Upload an attachment to a report ─────────────────────────────────────────
+
+app.post("/api/reports/:slug/attachments", async (req: Request, res: Response) => {
+  const slug = req.params.slug;
+  const filename = (req.headers["x-filename"] as string) || "upload";
+  const mimeType = (req.headers["content-type"] as string) || "application/octet-stream";
+  const buffer = req.body as Buffer;
+
+  if (!buffer || buffer.length === 0) {
+    return res.status(400).json({ error: "No file data received" });
+  }
+
+  // Validate
+  const validation = validateUpload(filename, mimeType, buffer.length);
+  if (!validation.valid) {
+    return res.status(400).json({ error: validation.error });
+  }
+
+  try {
+    const attachment = await uploadAttachment(slug, filename, mimeType, buffer);
+
+    // If there's an active job for this slug, add the attachment to it
+    const job = getLatestJobForSlug(slug);
+    if (job && (job.status === "queued" || job.status === "running")) {
+      await addAttachmentToJob(job.jobId, attachment);
+    }
+
+    res.status(201).json(attachment);
+  } catch (err: unknown) {
+    console.error("Upload error:", err);
+    res.status(500).json({ error: "Failed to upload attachment" });
+  }
+});
+
+// ── List attachments for a report ────────────────────────────────────────────
+
+app.get("/api/reports/:slug/attachments", (req: Request, res: Response) => {
+  const job = getLatestJobForSlug(req.params.slug);
+  if (!job) return res.json({ attachments: [] });
+  res.json({ attachments: job.attachments });
+});
+
+// ── Delete an attachment ─────────────────────────────────────────────────────
+
+app.delete("/api/reports/:slug/attachments/:attachmentId", async (req: Request, res: Response) => {
+  const job = getLatestJobForSlug(req.params.slug);
+  if (!job) return res.status(404).json({ error: "No job found for this report" });
+
+  const attachment = job.attachments.find((a) => a.id === req.params.attachmentId);
+  if (!attachment) return res.status(404).json({ error: "Attachment not found" });
+
+  try {
+    await deleteAttachment(attachment.s3Key);
+    await removeAttachmentFromJob(job.jobId, attachment.id);
+    res.json({ success: true });
+  } catch (err: unknown) {
+    console.error("Delete attachment error:", err);
+    res.status(500).json({ error: "Failed to delete attachment" });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// LEGACY: Original SSE endpoints (kept for backward compatibility)
+// ══════════════════════════════════════════════════════════════════════════════
+
 // ── SSE endpoint: generate an explainable report ────────────────────────────
 
 app.post("/api/generate", rateLimit, async (req: Request, res: Response) => {
@@ -165,8 +669,6 @@ app.post("/api/generate", rateLimit, async (req: Request, res: Response) => {
     "X-Content-Type-Options": "nosniff",
   });
 
-  // Track true client disconnects so we can abort the pipeline.
-  // Do not rely on req.close for POST bodies; that can fire after request read.
   let aborted = false;
   req.on("aborted", () => {
     aborted = true;
@@ -181,7 +683,6 @@ app.post("/api/generate", rateLimit, async (req: Request, res: Response) => {
     }
   };
 
-  // Heartbeat to keep connection alive through proxies
   const heartbeat = setInterval(() => {
     if (!aborted && !res.writableEnded) {
       res.write(": heartbeat\n\n");
@@ -195,7 +696,6 @@ app.post("/api/generate", rateLimit, async (req: Request, res: Response) => {
     const err = thrown as PipelineError;
     console.error("Pipeline error:", err);
     if (!aborted) {
-      // Show detailed error info for debugging
       const detail = {
         message: err.message || "Unknown error",
         stage: err.stage || "unknown",

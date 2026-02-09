@@ -86,16 +86,34 @@ function createClassifyResponse() {
 /**
  * Smart fetch mock that routes requests to appropriate responses:
  * - /api/classify → classify JSON response
+ * - /api/jobs (POST) → create job JSON response
+ * - /api/jobs/:id/events (GET) → SSE response
  * - /api/reports/save → save JSON response
- * - /api/chat → SSE response
+ * - /api/reports/:slug/job → 404 (no pre-existing job)
  */
 function mockFetchForHomepage(sseResponse: ChunkedSseResponse) {
-  return vi.fn().mockImplementation((url: string) => {
+  return vi.fn().mockImplementation((url: string, opts?: { method?: string }) => {
     if (typeof url === "string" && url.includes("/api/classify")) {
       return Promise.resolve(createClassifyResponse());
     }
     if (typeof url === "string" && url.includes("/api/reports/save")) {
       return Promise.resolve(createJsonResponse({ slug: "nvda-test", version: 1, url: "/reports/nvda-test" }));
+    }
+    // Job creation endpoint (POST /api/jobs)
+    if (typeof url === "string" && url === "/api/jobs" && opts?.method === "POST") {
+      return Promise.resolve(createJsonResponse({ jobId: "job-test-123", slug: "nvda-test", status: "queued" }));
+    }
+    // Job events endpoint (GET /api/jobs/:id/events) → SSE stream
+    if (typeof url === "string" && url.includes("/api/jobs/") && url.includes("/events")) {
+      return Promise.resolve(sseResponse);
+    }
+    // Report job lookup (GET /api/reports/:slug/job) → 404
+    if (typeof url === "string" && url.match(/\/api\/reports\/[^/]+\/job$/)) {
+      return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({ error: "Not found" }) });
+    }
+    // Report load (GET /api/reports/:slug) → 404 for new reports
+    if (typeof url === "string" && url.match(/\/api\/reports\/[a-z0-9-]+$/)) {
+      return Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({ error: "Not found" }) });
     }
     return Promise.resolve(sseResponse);
   });

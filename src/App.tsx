@@ -8,6 +8,9 @@ import type {
   ChatMessage,
   DomainProfile,
   TraceData,
+  Attachment,
+  AgentWorkLog as WorkLogType,
+  ReportJob,
 } from "../shared/types";
 import QueryInput from "./components/QueryInput";
 import ChatPanel from "./components/ChatPanel";
@@ -15,6 +18,8 @@ import ReportView from "./components/Report";
 import SlideDeckView from "./components/SlideDeck";
 import ReportsPage from "./components/ReportsPage";
 import HealthPage from "./components/HealthPage";
+import AttachmentUpload from "./components/AttachmentUpload";
+import AgentWorkLogView from "./components/AgentWorkLog";
 
 // ── SSE parsing ─────────────────────────────────────────────────────────────
 
@@ -135,6 +140,13 @@ export default function App() {
   const [classifyError, setClassifyError] = useState<string | null>(null);
   const classifiedRef = useRef<{ domainProfile: DomainProfile; trace: TraceData } | null>(null);
 
+  // ── Job-based state (new architecture) ─────────────────────────────────────
+  const [currentJobId, setCurrentJobId] = useState<string | null>(null);
+  const [workLog, setWorkLog] = useState<WorkLogType | null>(null);
+
+  // ── Attachment state ───────────────────────────────────────────────────────
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+
   // Whether we're on the homepage (no slug, no messages, not loading)
   const isHomepage = !slug && messages.length === 0 && !isLoadingSlug && !loadError && utilityRoute === null;
 
@@ -159,19 +171,225 @@ export default function App() {
         setSlug(initialSlug);
         setSaveState("saved");
         setIsLoadingSlug(false);
+
+        // Check if there's an active job for this slug
+        checkForActiveJob(initialSlug);
       })
       .catch((err: Error) => {
         // If report not found, it might be a new classify-generated slug
-        // In that case, just show the report page in empty state
         if (err.message === "Report not found") {
           setSlug(initialSlug);
           setIsLoadingSlug(false);
+          // Still check for active job
+          checkForActiveJob(initialSlug);
           return;
         }
         setLoadError(err.message || "Failed to load report");
         setIsLoadingSlug(false);
       });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Check if there's an active background job for a report and reconnect to it */
+  const checkForActiveJob = useCallback(async (reportSlug: string) => {
+    try {
+      const res = await fetch(`/api/reports/${reportSlug}/job`);
+      if (!res.ok) return;
+
+      const jobSummary = await res.json();
+      if (jobSummary.status === "running" || jobSummary.status === "queued") {
+        // Active job found — reconnect to its event stream
+        setCurrentJobId(jobSummary.jobId);
+        setIsGenerating(true);
+        connectToJobEvents(jobSummary.jobId);
+      }
+    } catch {
+      // No active job, that's fine
+    }
+  }, []);
+
+  /** Connect to a job's SSE event stream (reconnectable) */
+  const connectToJobEvents = useCallback((jobId: string) => {
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    const newVersion = reportVersion + 1;
+    let collectedProgress: ProgressEvent[] = [];
+    let collectedTraceData: TraceEvent[] = [];
+    let receivedReport = false;
+    let receivedError = false;
+    let finalReport: Report | null = null;
+    let collectedError: ErrorInfo | null = null;
+
+    fetch(`/api/jobs/${jobId}/events`, { signal: controller.signal })
+      .then(async (res) => {
+        if (!res.ok || !res.body) {
+          throw new Error(`Failed to connect to job events: ${res.status}`);
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        const handleEventPayload = (eventType: string, payload: unknown): void => {
+          if (eventType === "progress") {
+            const evt = payload as ProgressEvent;
+            collectedProgress = [...collectedProgress, evt];
+            setLiveProgress((prev) => [...prev, evt]);
+            if (evt.draftAnswer) {
+              setDraftAnswer(evt.draftAnswer);
+            }
+            return;
+          }
+
+          if (eventType === "trace") {
+            const evt = payload as TraceEvent;
+            collectedTraceData = [...collectedTraceData, evt];
+            setCurrentTraceData((prev) => [...prev, evt]);
+            return;
+          }
+
+          if (eventType === "work_log") {
+            setWorkLog(payload as WorkLogType);
+            return;
+          }
+
+          if (eventType === "skill_start" || eventType === "skill_complete" || eventType === "skill_error") {
+            // These are informational — work_log covers the state
+            return;
+          }
+
+          if (eventType === "attachment_added") {
+            setAttachments((prev) => [...prev, payload as Attachment]);
+            return;
+          }
+
+          if (eventType === "attachment_removed") {
+            const { id } = payload as { id: string };
+            setAttachments((prev) => prev.filter((a) => a.id !== id));
+            return;
+          }
+
+          if (eventType === "job_status") {
+            const { status } = payload as { status: string };
+            if (status === "failed") {
+              receivedError = true;
+            }
+            return;
+          }
+
+          const data = payload as Record<string, unknown> | null | undefined;
+
+          if (eventType === "error" || (eventType === "message" && typeof data?.error === "string")) {
+            receivedError = true;
+            collectedError = {
+              message: (data?.message as string) || (data?.error as string) || "Report generation failed.",
+              detail: (data?.detail as ErrorDetail) || null,
+            };
+            setLiveError(collectedError);
+            return;
+          }
+
+          if (eventType === "report" || (eventType === "message" && isReportPayload(payload))) {
+            receivedReport = true;
+            finalReport = payload as Report;
+            setCurrentReport(finalReport);
+            setDraftAnswer(null);
+            setReportVersion(newVersion);
+            return;
+          }
+
+          if (eventType === "done") {
+            // Stream complete
+            return;
+          }
+        };
+
+        const handleSerializedData = (eventType: string, serialized: string): void => {
+          try {
+            const payload: unknown = JSON.parse(serialized);
+            handleEventPayload(eventType, payload);
+          } catch {
+            // skip malformed JSON
+          }
+        };
+
+        const flushBuffer = (force: boolean = false): void => {
+          const separator = /\r?\n\r?\n/g;
+          let start = 0;
+          let match: RegExpExecArray | null;
+
+          while ((match = separator.exec(buffer)) !== null) {
+            const block = buffer.slice(start, match.index);
+            start = match.index + match[0].length;
+
+            const parsed = parseSseBlock(block);
+            if (parsed) handleSerializedData(parsed.eventType, parsed.data);
+          }
+
+          buffer = buffer.slice(start);
+
+          if (!force || buffer.trim().length === 0) return;
+
+          const parsed = parseSseBlock(buffer);
+          if (parsed) {
+            handleSerializedData(parsed.eventType, parsed.data);
+            buffer = "";
+            return;
+          }
+
+          handleSerializedData("message", buffer);
+          buffer = "";
+        };
+
+        while (true) {
+          const { done, value }: ReadableStreamReadResult<Uint8Array> = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          flushBuffer();
+        }
+        buffer += decoder.decode();
+        flushBuffer(true);
+
+        // Stream ended — finalize
+        setIsGenerating(false);
+        setLiveProgress([]);
+        setLiveError(null);
+        setCurrentJobId(null);
+
+        if (receivedReport && finalReport) {
+          const assistantMsg: ChatMessage = {
+            id: genId(),
+            role: "assistant" as const,
+            content: `Report ${newVersion > 1 ? `updated (v${newVersion})` : "generated"} successfully.`,
+            timestamp: Date.now(),
+            reportVersion: newVersion,
+            progress: collectedProgress,
+            traceData: collectedTraceData,
+          };
+          setMessages((prev) => [...prev, assistantMsg]);
+          setSaveState("saved"); // Job auto-saves
+        } else if (receivedError) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: genId(),
+              role: "assistant" as const,
+              content: collectedError?.message || "An error occurred.",
+              timestamp: Date.now(),
+              progress: collectedProgress,
+              error: collectedError,
+            },
+          ]);
+        }
+      })
+      .catch((err) => {
+        if (err.name === "AbortError") return;
+        console.error("Job event stream error:", err);
+        setIsGenerating(false);
+        setCurrentJobId(null);
+      });
+  }, [reportVersion]);
 
   // ── Auto-save helper ────────────────────────────────────────────────────────
   const autoSave = useCallback(async (report: Report, allMessages: ChatMessage[], currentSlug: string | null): Promise<string | null> => {
@@ -192,7 +410,6 @@ export default function App() {
       const result = await res.json() as { slug: string; version: number; url: string };
       setSaveState("saved");
 
-      // If slug changed (shouldn't happen often), update it
       if (!currentSlug || currentSlug !== result.slug) {
         setSlug(result.slug);
         window.history.pushState(null, "", result.url);
@@ -226,6 +443,9 @@ export default function App() {
     setIsClassifying(false);
     setClassifyError(null);
     classifiedRef.current = null;
+    setCurrentJobId(null);
+    setWorkLog(null);
+    setAttachments([]);
     window.history.pushState(null, "", "/");
   }, []);
 
@@ -235,8 +455,8 @@ export default function App() {
       abortRef.current = null;
     }
     setIsGenerating(false);
+    setCurrentJobId(null);
 
-    // Add an assistant message noting the abort
     setMessages((prev) => [
       ...prev,
       {
@@ -252,12 +472,10 @@ export default function App() {
     setLiveError(null);
   }, [liveProgress]);
 
-  // ── Start the full pipeline (research → synthesize → verify) ──────────────
-  const startPipeline = useCallback(async (userMessage: string, pipelineSlug: string) => {
-    // Abort any in-flight request
+  // ── Start a job via the new job API ────────────────────────────────────────
+  const startJobPipeline = useCallback(async (userMessage: string, pipelineSlug: string) => {
+    // Abort any in-flight connection
     if (abortRef.current) abortRef.current.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
 
     // Add user message
     const userMsg: ChatMessage = {
@@ -274,10 +492,85 @@ export default function App() {
     setLiveError(null);
     setCurrentTraceData([]);
     setDraftAnswer(null);
+    setWorkLog(null);
+
+    try {
+      const messageHistory = messages
+        .concat(userMsg)
+        .map((m) => ({ role: m.role, content: m.content }));
+
+      const preClassified = classifiedRef.current;
+
+      // Create a background job
+      const res = await fetch("/api/jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: userMessage,
+          slug: pipelineSlug,
+          conversationId,
+          messageHistory,
+          previousReport: currentReport,
+          reasoningLevel,
+          ...(preClassified ? {
+            domainProfile: preClassified.domainProfile,
+            classifierTrace: preClassified.trace,
+          } : {}),
+        }),
+      });
+
+      classifiedRef.current = null;
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `Server error: ${res.status}`);
+      }
+
+      const { jobId } = await res.json() as { jobId: string; slug: string; status: string };
+      setCurrentJobId(jobId);
+
+      // Connect to the job's event stream
+      connectToJobEvents(jobId);
+    } catch (rawErr: unknown) {
+      const err = rawErr instanceof Error ? rawErr : new Error(String(rawErr));
+      setIsGenerating(false);
+      setCurrentJobId(null);
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: genId(),
+          role: "assistant" as const,
+          content: err.message || "An unknown error occurred.",
+          timestamp: Date.now(),
+          error: { message: err.message, detail: null },
+        },
+      ]);
+    }
+  }, [conversationId, messages, currentReport, reasoningLevel, connectToJobEvents]);
+
+  // ── Legacy pipeline (fallback for /api/chat) ──────────────────────────────
+  const startPipeline = useCallback(async (userMessage: string, pipelineSlug: string) => {
+    if (abortRef.current) abortRef.current.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    const userMsg: ChatMessage = {
+      id: genId(),
+      role: "user",
+      content: userMessage,
+      timestamp: Date.now(),
+    };
+    setMessages((prev) => [...prev, userMsg]);
+
+    setIsGenerating(true);
+    setLiveProgress([]);
+    setLiveError(null);
+    setCurrentTraceData([]);
+    setDraftAnswer(null);
 
     const newVersion = reportVersion + 1;
 
-    // Local flags to avoid stale closure over React state
     let receivedReport = false;
     let receivedError = false;
     let finalReport: Report | null = null;
@@ -286,12 +579,10 @@ export default function App() {
     let collectedError: ErrorInfo | null = null;
 
     try {
-      // Build message history for context
       const messageHistory = messages
         .concat(userMsg)
         .map((m) => ({ role: m.role, content: m.content }));
 
-      // Pass pre-classified data if available (first query from homepage)
       const preClassified = classifiedRef.current;
 
       const res = await fetch("/api/chat", {
@@ -311,7 +602,6 @@ export default function App() {
         signal: controller.signal,
       });
 
-      // Clear pre-classified data after first use
       classifiedRef.current = null;
 
       if (!res.ok) {
@@ -414,7 +704,6 @@ export default function App() {
       buffer += decoder.decode();
       flushBuffer(true);
 
-      // Done — add assistant message and auto-save
       setIsGenerating(false);
       setLiveProgress([]);
       setLiveError(null);
@@ -432,7 +721,6 @@ export default function App() {
         const allMessages = [...messages, userMsg, assistantMsg];
         setMessages(allMessages);
 
-        // Auto-save report + conversation
         autoSave(finalReport, allMessages, pipelineSlug);
       } else if (receivedError) {
         setMessages((prev) => [
@@ -490,7 +778,7 @@ export default function App() {
     }
   }, [conversationId, messages, currentReport, reasoningLevel, reportVersion, autoSave]);
 
-  // ── Handle query submission from homepage (classify → navigate → pipeline) ─
+  // ── Handle query submission from homepage (classify → navigate → job) ──────
   const handleHomepageSubmit = useCallback(async (query: string) => {
     setIsClassifying(true);
     setClassifyError(null);
@@ -509,27 +797,35 @@ export default function App() {
 
       const result = await res.json() as { slug: string; domainProfile: DomainProfile; trace: TraceData };
 
-      // Store classified data for the pipeline to skip re-classification
       classifiedRef.current = { domainProfile: result.domainProfile, trace: result.trace };
 
-      // Set slug and navigate to report page
       setSlug(result.slug);
       window.history.pushState(null, "", `/reports/${result.slug}`);
       setIsClassifying(false);
 
-      // Start the full pipeline (will skip classifier since preClassified is set)
-      startPipeline(query, result.slug);
+      // Use job-based pipeline (background processing)
+      startJobPipeline(query, result.slug);
     } catch (rawErr: unknown) {
       const err = rawErr instanceof Error ? rawErr : new Error(String(rawErr));
       setIsClassifying(false);
       setClassifyError(err.message || "Classification failed");
     }
-  }, [reasoningLevel, startPipeline]);
+  }, [reasoningLevel, startJobPipeline]);
 
   // ── Handle send from ChatPanel (follow-up queries on report page) ─────────
   const handleSend = useCallback(async (userMessage: string) => {
-    await startPipeline(userMessage, slug || "");
-  }, [startPipeline, slug]);
+    // Use job-based pipeline for follow-ups too
+    await startJobPipeline(userMessage, slug || "");
+  }, [startJobPipeline, slug]);
+
+  // ── Attachment handlers ───────────────────────────────────────────────────
+  const handleAttachmentAdded = useCallback((attachment: Attachment) => {
+    setAttachments((prev) => [...prev, attachment]);
+  }, []);
+
+  const handleAttachmentRemoved = useCallback((id: string) => {
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+  }, []);
 
   // ── Utility routes ────────────────────────────────────────────────────────
 
@@ -633,6 +929,7 @@ export default function App() {
           }}
         >
           Explainable research — every claim backed by evidence, scored for certainty.
+          Attach files, and your report keeps working even if you close the tab.
         </p>
         <QueryInput
           onSubmit={handleHomepageSubmit}
@@ -677,6 +974,8 @@ export default function App() {
         minWidth: 340,
         maxWidth: 500,
         overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
       }}>
         <ChatPanel
           messages={messages}
@@ -691,6 +990,33 @@ export default function App() {
           onReasoningLevelChange={setReasoningLevel}
           saveState={saveState}
         />
+
+        {/* Attachments + Agent Work Log (below chat panel) */}
+        <div style={{
+          padding: "8px 16px",
+          borderTop: "1px solid #e2e4ea",
+          overflowY: "auto",
+          maxHeight: 280,
+        }}>
+          <AttachmentUpload
+            slug={slug}
+            attachments={attachments}
+            onAttachmentAdded={handleAttachmentAdded}
+            onAttachmentRemoved={handleAttachmentRemoved}
+            disabled={!slug}
+          />
+          {workLog && <AgentWorkLogView workLog={workLog} />}
+          {currentJobId && !isGenerating && (
+            <div style={{
+              fontSize: 10,
+              color: "#8a8ca5",
+              textAlign: "center",
+              padding: "4px 0",
+            }}>
+              Job: {currentJobId}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Center + Right: Report area */}
@@ -798,7 +1124,7 @@ export default function App() {
                 </div>
                 <p style={{ fontSize: 14, fontWeight: 500, maxWidth: 400, textAlign: "center", lineHeight: 1.6 }}>
                   {isGenerating
-                    ? "Generating your research report..."
+                    ? "Agent is building your research report..."
                     : "Start a conversation to generate an interactive research report."}
                 </p>
                 {isGenerating && (
@@ -818,6 +1144,11 @@ export default function App() {
                       transition: "width 0.5s ease",
                     }} />
                   </div>
+                )}
+                {isGenerating && (
+                  <p style={{ fontSize: 11, fontWeight: 400, color: "#8a8ca5", marginTop: 12 }}>
+                    Your report will keep building even if you close this tab.
+                  </p>
                 )}
               </>
             )}
