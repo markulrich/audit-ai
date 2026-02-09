@@ -12,6 +12,7 @@ import type {
 import QueryInput from "./components/QueryInput";
 import ChatPanel from "./components/ChatPanel";
 import ReportView from "./components/Report";
+import SlideDeckView from "./components/SlideDeck";
 import ReportsPage from "./components/ReportsPage";
 import HealthPage from "./components/HealthPage";
 
@@ -692,13 +693,23 @@ export default function App() {
         display: "flex",
       }}>
         {currentReport ? (
-          <ReportView
-            data={currentReport}
-            traceData={currentTraceData}
-            onBack={handleNewConversation}
-            slug={slug}
-            saveState={saveState}
-          />
+          currentReport.meta?.outputFormat === "slide_deck" ? (
+            <SlideDeckView
+              data={currentReport}
+              traceData={currentTraceData}
+              onBack={handleNewConversation}
+              slug={slug}
+              saveState={saveState}
+            />
+          ) : (
+            <ReportView
+              data={currentReport}
+              traceData={currentTraceData}
+              onBack={handleNewConversation}
+              slug={slug}
+              saveState={saveState}
+            />
+          )
         ) : (
           /* Empty state — waiting for report */
           <div style={{

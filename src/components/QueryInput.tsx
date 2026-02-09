@@ -16,8 +16,8 @@ interface ReasoningLevelOption {
 const EXAMPLES: string[] = [
   "Analyze NVIDIA (NVDA)",
   "Deep dive on Tesla's competitive position",
-  "Palantir equity research report",
-  "Apple financial analysis and outlook",
+  "Pitch deck for an AI-powered legal tech startup",
+  "Slide deck on Apple's financial performance",
 ];
 
 const REASONING_LEVELS: ReasoningLevelOption[] = [

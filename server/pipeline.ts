@@ -77,7 +77,7 @@ export async function runPipeline(
       message: `Identified ${domainProfile.companyName} (${domainProfile.ticker})`,
       percent: 10,
       domainProfile,
-      detail: `Domain: ${domainProfile.domainLabel} | Ticker: ${domainProfile.ticker} | Focus: ${domainProfile.focusAreas.join(", ") || "general"} (pre-classified)`,
+      detail: `Domain: ${domainProfile.domainLabel} | Ticker: ${domainProfile.ticker} | Format: ${domainProfile.outputFormat} | Focus: ${domainProfile.focusAreas.join(", ") || "general"} (pre-classified)`,
       stats: {
         model: classifierTrace.request?.model || ANTHROPIC_MODEL,
         durationMs: classifierTrace.timing?.durationMs,
@@ -101,6 +101,7 @@ export async function runPipeline(
       substeps: [
         { text: "Extracting company name and ticker symbol", status: "active" },
         { text: "Identifying research domain", status: "pending" },
+        { text: "Determining output format", status: "pending" },
         { text: "Determining focus areas", status: "pending" },
       ],
     });
@@ -119,7 +120,7 @@ export async function runPipeline(
       message: `Identified ${domainProfile.companyName} (${domainProfile.ticker})`,
       percent: 10,
       domainProfile,
-      detail: `Domain: ${domainProfile.domainLabel} | Ticker: ${domainProfile.ticker} | Focus: ${domainProfile.focusAreas.join(", ") || "general"}`,
+      detail: `Domain: ${domainProfile.domainLabel} | Ticker: ${domainProfile.ticker} | Format: ${domainProfile.outputFormat} | Focus: ${domainProfile.focusAreas.join(", ") || "general"}`,
       stats: {
         model: classifierTrace.request?.model || ANTHROPIC_MODEL,
         durationMs: classifierTrace.timing?.durationMs,
@@ -136,20 +137,34 @@ export async function runPipeline(
     });
   }
 
+  const isPitch = domainProfile.domain === "pitch_deck";
+  const isSlides = domainProfile.outputFormat === "slide_deck";
+
   // ── Stage 2: Research ───────────────────────────────────────────────────────
+  const researchSubsteps = isPitch
+    ? [
+        { text: "Market research and TAM/SAM/SOM", status: "active" },
+        { text: "Competitive intelligence", status: "active" },
+        { text: "Company and product data", status: "active" },
+        { text: "Traction and growth metrics", status: "active" },
+        { text: "Industry trends and customer data", status: "active" },
+        { text: "Risk factors and challenges", status: "active" },
+      ]
+    : [
+        { text: "SEC filings and earnings releases", status: "active" },
+        { text: "Analyst consensus and price targets", status: "active" },
+        { text: "Product announcements and roadmap", status: "active" },
+        { text: "Competitive positioning and market share", status: "active" },
+        { text: "Industry trends and macro factors", status: "active" },
+        { text: "Risk factors (regulatory, geopolitical)", status: "active" },
+      ];
+
   send("progress", {
     stage: "researching",
     message: `Gathering evidence on ${domainProfile.companyName} (${domainProfile.ticker})...`,
     percent: 15,
-    detail: `Collecting ${config.evidenceMinItems}+ data points across financials, products, competition, risks, and analyst sentiment. Using ${config.researcherModel || ANTHROPIC_MODEL}.`,
-    substeps: [
-      { text: "SEC filings and earnings releases", status: "active" },
-      { text: "Analyst consensus and price targets", status: "active" },
-      { text: "Product announcements and roadmap", status: "active" },
-      { text: "Competitive positioning and market share", status: "active" },
-      { text: "Industry trends and macro factors", status: "active" },
-      { text: "Risk factors (regulatory, geopolitical)", status: "active" },
-    ],
+    detail: `Collecting ${config.evidenceMinItems}+ data points across ${isPitch ? "market, competition, traction, and financials" : "financials, products, competition, risks, and analyst sentiment"}. Using ${config.researcherModel || ANTHROPIC_MODEL}.`,
+    substeps: researchSubsteps,
   });
 
   let evidence: EvidenceItem[];
@@ -203,18 +218,31 @@ export async function runPipeline(
   });
 
   // ── Stage 3: Synthesize ─────────────────────────────────────────────────────
+  const synthesisMessage = isSlides ? "Designing slides..." : "Drafting findings and report structure...";
+  const synthesisSubsteps = isPitch
+    ? [
+        { text: "Problem and solution slides", status: "active" },
+        { text: "Market opportunity and business model", status: "active" },
+        { text: "Traction and competitive landscape", status: "active" },
+        { text: "Team, financials, and funding ask", status: "active" },
+        { text: isSlides ? "Formatting findings as bullet points" : "Weaving findings into natural prose", status: "active" },
+      ]
+    : [
+        { text: "Investment thesis", status: "active" },
+        { text: "Price action and financial performance", status: "active" },
+        { text: "Product, technology, and competitive landscape", status: "active" },
+        { text: "Industry trends, risks, and analyst consensus", status: "active" },
+        { text: isSlides ? "Formatting findings as bullet points" : "Weaving findings into natural prose", status: "active" },
+      ];
+
+  const sectionCount = isPitch ? 10 : 8;
+
   send("progress", {
     stage: "synthesizing",
-    message: "Drafting findings and report structure...",
+    message: synthesisMessage,
     percent: 50,
-    detail: `Transforming ${Array.isArray(evidence) ? evidence.length : 0} evidence items into structured equity research report with ${config.synthesizerModel || ANTHROPIC_MODEL}. Target: ${config.totalFindings} findings across 8 sections.`,
-    substeps: [
-      { text: "Investment thesis", status: "active" },
-      { text: "Price action and financial performance", status: "active" },
-      { text: "Product, technology, and competitive landscape", status: "active" },
-      { text: "Industry trends, risks, and analyst consensus", status: "active" },
-      { text: "Weaving findings into natural prose", status: "active" },
-    ],
+    detail: `Transforming ${Array.isArray(evidence) ? evidence.length : 0} evidence items into ${isSlides ? "slide deck" : "structured equity research report"} with ${config.synthesizerModel || ANTHROPIC_MODEL}. Target: ${config.totalFindings} findings across ${sectionCount} ${isSlides ? "slides" : "sections"}.`,
+    substeps: synthesisSubsteps,
   });
 
   let draft: Report;
@@ -238,7 +266,7 @@ export async function runPipeline(
 
   send("progress", {
     stage: "synthesized",
-    message: `Drafted ${draft.findings?.length || 0} findings across ${draft.sections?.length || 0} sections`,
+    message: `Drafted ${draft.findings?.length || 0} findings across ${draft.sections?.length || 0} ${isSlides ? "slides" : "sections"}`,
     percent: 70,
     detail: sectionBreakdown.join(" | "),
     stats: {
@@ -284,6 +312,10 @@ export async function runPipeline(
     throw tagError(err as PipelineError, "verifier");
   }
   if (isAborted()) return;
+
+  // Ensure outputFormat is set on the final report
+  if (!report.meta) report.meta = {} as Report["meta"];
+  report.meta.outputFormat = domainProfile.outputFormat;
 
   const findingsCount: number = report.findings?.length || 0;
   const avgCertainty: number =

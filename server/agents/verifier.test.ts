@@ -42,6 +42,14 @@ interface MakeVerifiedReportOptions {
 const domainProfile = {
   ticker: "TEST",
   companyName: "Test Corp",
+  outputFormat: "written_report",
+} as DomainProfile;
+
+/** Slide deck domain profile */
+const slideDeckProfile = {
+  ticker: "TEST",
+  companyName: "Test Corp",
+  outputFormat: "slide_deck",
 } as DomainProfile;
 
 /** Builds a minimal valid draft (the output of the synthesizer stage). */
@@ -133,7 +141,7 @@ function mockEmptyResponse(): void {
 // ---------------------------------------------------------------------------
 
 beforeEach(() => {
-  vi.restoreAllMocks();
+  vi.clearAllMocks();
 });
 
 describe("verifier agent", () => {
@@ -317,6 +325,65 @@ describe("verifier agent", () => {
 
       const { result } = await verify("test query", domainProfile, makeDraft() as unknown as Report, undefined);
       expect(result.meta.overallCertainty).toBe(80); // mean of [80, 80]
+    });
+  });
+
+  // ── Slide deck field preservation ───────────────────────────────────────
+
+  describe("slide deck field preservation", () => {
+    function makeSlideProfile(): DomainProfile {
+      return { ticker: "TEST", companyName: "Test Corp", outputFormat: "slide_deck", domain: "pitch_deck", domainLabel: "Pitch Deck", defaultOutputFormat: "slide_deck", sourceHierarchy: [], certaintyRubric: "", evidenceStyle: "", contraryThreshold: "", toneTemplate: "", sections: [], reportMeta: { ratingOptions: [] }, focusAreas: [], timeframe: "current" } as DomainProfile;
+    }
+
+    it("preserves slide-specific fields (layout, speakerNotes) through verification", async () => {
+      const report = makeVerifiedReport();
+      report.sections[0] = {
+        ...report.sections[0],
+        layout: "content" as const,
+        subtitle: "Key Thesis Points",
+        speakerNotes: "Discuss the main investment thesis here.",
+      };
+      mockAiResponse(JSON.stringify(report));
+
+      const { result } = await verify("test query", makeSlideProfile(), makeDraft() as unknown as Report, undefined);
+      expect(result.sections[0].layout).toBe("content");
+      expect(result.sections[0].subtitle).toBe("Key Thesis Points");
+      expect(result.sections[0].speakerNotes).toBe("Discuss the main investment thesis here.");
+    });
+
+    it("includes slide deck instruction in prompt when outputFormat is slide_deck", async () => {
+      const report = makeVerifiedReport();
+      mockAiResponse(JSON.stringify(report));
+
+      await verify("test query", makeSlideProfile(), makeDraft() as unknown as Report, undefined);
+
+      const callArgs = mockedTracedCreate.mock.calls[0][0];
+      expect(callArgs.system).toContain("slide deck");
+      expect(callArgs.system).toContain("layout");
+      expect(callArgs.system).toContain("speakerNotes");
+    });
+  });
+
+  // ── cleanOrphanedRefs: title_slide preservation ─────────────────────────
+
+  describe("cleanOrphanedRefs preserves title_slide", () => {
+    it("preserves title_slide sections with no findings", async () => {
+      const slideProfile = { ticker: "TEST", companyName: "Test Corp", outputFormat: "slide_deck", domain: "pitch_deck", domainLabel: "Pitch Deck", defaultOutputFormat: "slide_deck", sourceHierarchy: [], certaintyRubric: "", evidenceStyle: "", contraryThreshold: "", toneTemplate: "", sections: [], reportMeta: { ratingOptions: [] }, focusAreas: [], timeframe: "current" } as DomainProfile;
+      const report = makeVerifiedReport();
+      report.sections.unshift({
+        id: "title_slide",
+        title: "Company Name",
+        layout: "title" as const,
+        content: [
+          { type: "text" as const, value: "A brief description of the company" },
+        ],
+      });
+      mockAiResponse(JSON.stringify(report));
+
+      const { result } = await verify("test query", slideProfile, makeDraft() as unknown as Report, undefined);
+      const titleSlide = result.sections.find((s) => s.id === "title_slide");
+      expect(titleSlide).toBeDefined();
+      expect(titleSlide!.content[0].type).toBe("text");
     });
   });
 });
