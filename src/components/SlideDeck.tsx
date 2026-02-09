@@ -125,11 +125,12 @@ interface SlideDeckProps {
   slug?: string | null;
   saveState?: SaveState;
   onRetrySave?: () => void;
+  onToggleView?: () => void;
 }
 
 // ─── Main SlideDeck Component ──────────────────────────────────────────────────
 
-export default function SlideDeck({ data, traceData, onBack, slug, saveState, onRetrySave }: SlideDeckProps) {
+export default function SlideDeck({ data, traceData, onBack, slug, saveState, onRetrySave, onToggleView }: SlideDeckProps) {
   const [currentSlide, setCurrentSlide] = useState(0);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [showPanel, setShowPanel] = useState<boolean>(false);
@@ -139,7 +140,20 @@ export default function SlideDeck({ data, traceData, onBack, slug, saveState, on
   const { meta, sections, findings } = data;
 
   const safeFindings = useMemo<Finding[]>(() => Array.isArray(findings) ? findings : [], [findings]);
-  const safeSections = useMemo<Section[]>(() => Array.isArray(sections) ? sections : [], [sections]);
+  const rawSections = useMemo<Section[]>(() => Array.isArray(sections) ? sections : [], [sections]);
+
+  // If there's no title slide, synthesize one from meta so the deck always opens with a title
+  const safeSections = useMemo<Section[]>(() => {
+    const hasTitle = rawSections.some((s) => s.id === "title_slide" || s.layout === "title");
+    if (hasTitle || rawSections.length === 0) return rawSections;
+    const syntheticTitle: Section = {
+      id: "title_slide",
+      title: meta?.title || "Slide Deck",
+      layout: "title",
+      content: meta?.tagline ? [{ type: "text" as const, value: meta.tagline }] : [],
+    };
+    return [syntheticTitle, ...rawSections];
+  }, [rawSections, meta?.title, meta?.tagline]);
 
   const findingsMap = useMemo<Record<string, Finding>>(() => {
     const map: Record<string, Finding> = {};
@@ -343,6 +357,23 @@ export default function SlideDeck({ data, traceData, onBack, slug, saveState, on
             >
               Back
             </button>
+            {onToggleView && (
+              <button
+                onClick={onToggleView}
+                aria-label="View as written report"
+                style={{
+                  border: `1px solid ${DK.border}`,
+                  background: "transparent",
+                  borderRadius: 4,
+                  padding: "4px 12px",
+                  fontSize: 12,
+                  color: DK.textDim,
+                  cursor: "pointer",
+                }}
+              >
+                View as Report
+              </button>
+            )}
             <span style={{ fontSize: 13, fontWeight: 600, color: DK.text }}>
               {meta?.title || "Slide Deck"}
             </span>

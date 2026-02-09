@@ -130,10 +130,23 @@ export default function App() {
   const [isLoadingSlug, setIsLoadingSlug] = useState<boolean>(!!getSlugFromPath());
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  // ── View mode toggle (report vs slide deck) ────────────────────────────────
+  const [viewMode, setViewMode] = useState<"report" | "slides" | null>(null);
+
   // ── Classify state (homepage → classify → navigate) ────────────────────────
   const [isClassifying, setIsClassifying] = useState(false);
   const [classifyError, setClassifyError] = useState<string | null>(null);
   const classifiedRef = useRef<{ domainProfile: DomainProfile; trace: TraceData } | null>(null);
+
+  // Sync viewMode to match report's native format when a new report arrives
+  const effectiveViewMode = viewMode ?? (currentReport?.meta?.outputFormat === "slide_deck" ? "slides" : "report");
+
+  const handleToggleView = useCallback(() => {
+    setViewMode((prev) => {
+      const current = prev ?? (currentReport?.meta?.outputFormat === "slide_deck" ? "slides" : "report");
+      return current === "slides" ? "report" : "slides";
+    });
+  }, [currentReport?.meta?.outputFormat]);
 
   // Whether we're on the homepage (no slug, no messages, not loading)
   const isHomepage = !slug && messages.length === 0 && !isLoadingSlug && !loadError && utilityRoute === null;
@@ -229,6 +242,7 @@ export default function App() {
     setSlug(null);
     setSaveState("idle");
     setLoadError(null);
+    setViewMode(null);
     setIsClassifying(false);
     setClassifyError(null);
     classifiedRef.current = null;
@@ -706,7 +720,7 @@ export default function App() {
         display: "flex",
       }}>
         {currentReport ? (
-          currentReport.meta?.outputFormat === "slide_deck" ? (
+          effectiveViewMode === "slides" ? (
             <SlideDeckView
               data={currentReport}
               traceData={currentTraceData}
@@ -714,6 +728,7 @@ export default function App() {
               slug={slug}
               saveState={saveState}
               onRetrySave={handleRetrySave}
+              onToggleView={handleToggleView}
             />
           ) : (
             <ReportView
@@ -723,6 +738,7 @@ export default function App() {
               slug={slug}
               saveState={saveState}
               onRetrySave={handleRetrySave}
+              onToggleView={handleToggleView}
             />
           )
         ) : (
