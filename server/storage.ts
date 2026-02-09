@@ -11,7 +11,7 @@
  * and AWS_REGION as secrets on the app — no manual config needed.
  */
 
-import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command, HeadBucketCommand } from "@aws-sdk/client-s3";
 import type { Report } from "../shared/types";
 
 // ── S3 client ─────────────────────────────────────────────────────────────────
@@ -183,4 +183,25 @@ export async function listReports(): Promise<SlugMeta[]> {
   // Sort by most recently updated first
   metas.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
   return metas;
+}
+
+// ── Health check ────────────────────────────────────────────────────────────────
+
+export async function checkS3Health(): Promise<{ ok: boolean; bucket: string | undefined; endpoint: string | undefined; error?: string }> {
+  const missing: string[] = [];
+  if (!BUCKET) missing.push("BUCKET_NAME");
+  if (!S3_ENDPOINT) missing.push("AWS_ENDPOINT_URL_S3");
+  if (!process.env.AWS_ACCESS_KEY_ID) missing.push("AWS_ACCESS_KEY_ID");
+  if (!process.env.AWS_SECRET_ACCESS_KEY) missing.push("AWS_SECRET_ACCESS_KEY");
+
+  if (missing.length > 0) {
+    return { ok: false, bucket: BUCKET, endpoint: S3_ENDPOINT, error: `Missing env vars: ${missing.join(", ")}. Run \`fly storage create\` or set them manually.` };
+  }
+
+  try {
+    await s3.send(new HeadBucketCommand({ Bucket: BUCKET }));
+    return { ok: true, bucket: BUCKET, endpoint: S3_ENDPOINT };
+  } catch (err: unknown) {
+    return { ok: false, bucket: BUCKET, endpoint: S3_ENDPOINT, error: err instanceof Error ? err.message : String(err) };
+  }
 }

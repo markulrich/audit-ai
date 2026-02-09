@@ -10,7 +10,9 @@ concurrency:
 
 env:
   FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-  PREVIEW_APP: doublyai-pr-${{ github.event.pull_request.number }}
+  FLY_APP: audit-ai
+  PREVIEW_APP: audit-ai-pr-${{ github.event.pull_request.number }}
+  TIGRIS_BUCKET: audit-ai-reports
 
 jobs:
   deploy-preview:
@@ -44,17 +46,18 @@ jobs:
           flyctl apps list | grep -q "$PREVIEW_APP" || \
             flyctl apps create "$PREVIEW_APP" --org personal
 
-      - name: Provision Tigris storage (if needed)
+      - name: Share production Tigris bucket with preview app
         run: |
-          # `fly storage create` automatically sets BUCKET_NAME, AWS_ENDPOINT_URL_S3,
-          # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and AWS_REGION on the app.
+          # Grants the preview app access to the production bucket.
+          # Auto-sets BUCKET_NAME, AWS_ENDPOINT_URL_S3, AWS_ACCESS_KEY_ID,
+          # AWS_SECRET_ACCESS_KEY on the preview app.
           if flyctl storage list --app "$PREVIEW_APP" 2>/dev/null | grep -q .; then
-            echo "Storage already provisioned, skipping."
+            echo "Storage already attached, skipping."
           else
-            flyctl storage create --app "$PREVIEW_APP" --name "${PREVIEW_APP}-reports"
+            flyctl storage update "$TIGRIS_BUCKET" --app "$PREVIEW_APP"
           fi
 
-      - name: Set secrets on preview app
+      - name: Set Anthropic key
         run: |
           flyctl secrets set ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
             --app "$PREVIEW_APP" --stage
@@ -72,7 +75,7 @@ jobs:
         with:
           script: |
             const url = `https://${process.env.PREVIEW_APP}.fly.dev`;
-            const body = `🚀 **Preview deployed!**\n\n${url}\n\n_This preview will be destroyed when the PR is closed._`;
+            const body = `**Preview deployed!**\n\n${url}\n\n_This preview will be destroyed when the PR is closed._`;
 
             // Find existing bot comment
             const { data: comments } = await github.rest.issues.listComments({
