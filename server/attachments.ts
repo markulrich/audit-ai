@@ -192,30 +192,105 @@ async function extractText(
   }
 }
 
-/** Basic PDF text extraction — looks for text between BT/ET operators */
+/** Unescape PDF string escape sequences (\n, \r, \t, \\, \(, \), octal) */
+function unescapePdfString(s: string): string {
+  return s.replace(/\\([nrtbf\\()]|[0-7]{1,3})/g, (_, c: string) => {
+    switch (c) {
+      case "n": return "\n";
+      case "r": return "\r";
+      case "t": return "\t";
+      case "b": return "\b";
+      case "f": return "\f";
+      case "\\": return "\\";
+      case "(": return "(";
+      case ")": return ")";
+      default: return String.fromCharCode(parseInt(c, 8)); // octal
+    }
+  });
+}
+
+/** Extract all parenthesized strings from a PDF text stream, handling nested parens */
+function extractPdfStrings(stream: string): string[] {
+  const strings: string[] = [];
+  let i = 0;
+  while (i < stream.length) {
+    if (stream[i] === "(") {
+      let depth = 1;
+      let start = i + 1;
+      i++;
+      while (i < stream.length && depth > 0) {
+        if (stream[i] === "\\" ) { i++; } // skip escaped char
+        else if (stream[i] === "(") { depth++; }
+        else if (stream[i] === ")") { depth--; }
+        i++;
+      }
+      if (depth === 0) {
+        strings.push(unescapePdfString(stream.slice(start, i - 1)));
+      }
+    } else {
+      i++;
+    }
+  }
+  return strings;
+}
+
+/**
+ * PDF text extraction — handles Tj (single string), TJ (array of strings/positions),
+ * and ' (move to next line + show string) operators.
+ */
 function extractPdfText(buffer: Buffer): string {
   const text = buffer.toString("latin1");
   const textParts: string[] = [];
 
-  // Extract text from PDF streams (basic approach)
+  // Extract text from PDF content streams
   const streamRegex = /stream\r?\n([\s\S]*?)\r?\nendstream/g;
   let match: RegExpExecArray | null;
 
   while ((match = streamRegex.exec(text)) !== null) {
     const stream = match[1];
-    // Look for text showing operators: Tj, TJ, '
-    const tjRegex = /\(([^)]*)\)\s*Tj/g;
+
+    // Method 1: TJ operator — array of strings and positioning values
+    // e.g. [(Hello ) -100 (World)] TJ
+    const tjArrayRegex = /\[((?:\([^)]*\)|[^])*?)\]\s*TJ/gi;
+    let tjArrayMatch: RegExpExecArray | null;
+    while ((tjArrayMatch = tjArrayRegex.exec(stream)) !== null) {
+      const arrayContent = tjArrayMatch[1];
+      const strings = extractPdfStrings(arrayContent);
+      if (strings.length > 0) {
+        textParts.push(strings.join(""));
+      }
+    }
+
+    // Method 2: Tj operator — single string (handles escaped parens)
+    // e.g. (Hello World) Tj or (Parens \(here\)) Tj
+    const tjRegex = /\(((?:[^\\)]*|\\.)*)\)\s*Tj/g;
     let tjMatch: RegExpExecArray | null;
     while ((tjMatch = tjRegex.exec(stream)) !== null) {
-      textParts.push(tjMatch[1]);
+      textParts.push(unescapePdfString(tjMatch[1]));
+    }
+
+    // Method 3: ' operator — move to next line and show string
+    // e.g. (Hello World) '
+    const quoteRegex = /\(((?:[^\\)]*|\\.)*)\)\s*'/g;
+    let quoteMatch: RegExpExecArray | null;
+    while ((quoteMatch = quoteRegex.exec(stream)) !== null) {
+      textParts.push(unescapePdfString(quoteMatch[1]));
     }
   }
 
-  if (textParts.length === 0) {
+  // Deduplicate consecutive identical strings (common in PDF rendering)
+  const deduped: string[] = [];
+  for (const part of textParts) {
+    if (deduped.length === 0 || deduped[deduped.length - 1] !== part) {
+      deduped.push(part);
+    }
+  }
+
+  if (deduped.length === 0) {
     return "[PDF document — text could not be extracted, agent will analyze content]";
   }
 
-  return textParts.join(" ").slice(0, 100_000);
+  return deduped.join(" ").slice(0, 100_000);
 }
 
 /** Basic DOCX text extraction — DOCX is a ZIP with XML inside */

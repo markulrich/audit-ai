@@ -68,6 +68,14 @@ const PORT = process.env.PORT || 3001;
 const MAX_QUERY_LENGTH = 5000;
 const MAX_ATTACHMENTS_PER_REPORT = 10;
 
+/** Safely serialize data for SSE (JSON.stringify + ensure no bare newlines break the protocol) */
+function sseSerialize(data: unknown): string {
+  const json = JSON.stringify(data);
+  // SSE protocol: data lines are separated by \n, so we must ensure the JSON is on a single line
+  // JSON.stringify already handles this but be safe against edge cases
+  return json.replace(/\n/g, "\\n");
+}
+
 // Track concurrent uploads per slug to prevent abuse
 const activeUploads = new Map<string, number>();
 
@@ -222,6 +230,17 @@ app.post("/api/jobs", rateLimit, async (req: Request, res: Response) => {
   }
   if ((query as string).length > MAX_QUERY_LENGTH) {
     return res.status(400).json({ error: `Query too long (max ${MAX_QUERY_LENGTH} chars)` });
+  }
+
+  // Validate slug if provided
+  if (slug && !/^[a-z0-9-]+$/.test(slug)) {
+    return res.status(400).json({ error: "Invalid slug format — must be lowercase alphanumeric with dashes" });
+  }
+
+  // Validate reasoning level if provided
+  const VALID_REASONING_LEVELS = ["x-light", "light", "heavy", "x-heavy"];
+  if (reasoningLevel && !VALID_REASONING_LEVELS.includes(reasoningLevel)) {
+    return res.status(400).json({ error: `Invalid reasoning level. Must be one of: ${VALID_REASONING_LEVELS.join(", ")}` });
   }
 
   // Use provided slug or generate one
@@ -509,7 +528,7 @@ app.get("/api/jobs/:jobId/events", async (req: Request, res: Response) => {
   // Send current state first (replay for reconnecting clients)
   const replaySend = (event: string, data: unknown) => {
     if (!res.writableEnded) {
-      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      res.write(`event: ${event}\ndata: ${sseSerialize(data)}\n\n`);
     }
   };
 
@@ -545,7 +564,7 @@ app.get("/api/jobs/:jobId/events", async (req: Request, res: Response) => {
   // Subscribe to live events
   const unsubscribe = subscribeToJob(job.jobId, (msg) => {
     if (!res.writableEnded) {
-      res.write(`event: ${msg.event}\ndata: ${JSON.stringify(msg.data)}\n\n`);
+      res.write(`event: ${msg.event}\ndata: ${sseSerialize(msg.data)}\n\n`);
     }
 
     // Close stream when job completes
@@ -730,7 +749,7 @@ app.post("/api/generate", rateLimit, async (req: Request, res: Response) => {
 
   const send: SendFn = (event: string, data: unknown): void => {
     if (!aborted && !res.writableEnded) {
-      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      res.write(`event: ${event}\ndata: ${sseSerialize(data)}\n\n`);
     }
   };
 
@@ -817,7 +836,7 @@ app.post("/api/chat", rateLimit, async (req: Request, res: Response) => {
 
   const send: SendFn = (event: string, data: unknown): void => {
     if (!aborted && !res.writableEnded) {
-      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      res.write(`event: ${event}\ndata: ${sseSerialize(data)}\n\n`);
     }
   };
 

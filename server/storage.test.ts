@@ -68,7 +68,7 @@ vi.mock("@aws-sdk/client-s3", () => {
   return { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command };
 });
 
-import { publishReport, getReport, listReports } from "./storage";
+import { publishReport, getReport, listReports, generateSlug, putJobState, getJobState } from "./storage";
 
 function makeReport(overrides?: Partial<Report["meta"]>): Report {
   return {
@@ -173,6 +173,107 @@ describe("storage", () => {
     it("returns null for non-existent slug", async () => {
       const result = await getReport("nonexistent-slug");
       expect(result).toBeNull();
+    });
+
+    it("retrieves a specific version", async () => {
+      const report1 = makeReport({ title: "V1 Report" });
+      const pub = await publishReport(report1);
+
+      const report2 = makeReport({ title: "V2 Report" });
+      await publishReport(report2, pub.slug);
+
+      // Get v1 specifically
+      const v1 = await getReport(pub.slug, 1);
+      expect(v1).not.toBeNull();
+      expect(v1!.report.meta.title).toBe("V1 Report");
+      expect(v1!.version).toBe(1);
+
+      // Get v2 specifically
+      const v2 = await getReport(pub.slug, 2);
+      expect(v2).not.toBeNull();
+      expect(v2!.report.meta.title).toBe("V2 Report");
+      expect(v2!.version).toBe(2);
+
+      // Get latest (no version)
+      const latest = await getReport(pub.slug);
+      expect(latest!.report.meta.title).toBe("V2 Report");
+      expect(latest!.currentVersion).toBe(2);
+    });
+
+    it("stores and retrieves messages with report", async () => {
+      const report = makeReport({ title: "With Messages" });
+      const messages = [
+        { id: "msg-1", role: "user" as const, content: "Analyze NVDA", timestamp: Date.now() },
+        { id: "msg-2", role: "assistant" as const, content: "Report generated.", timestamp: Date.now() },
+      ];
+
+      const pub = await publishReport(report, undefined, messages);
+      const retrieved = await getReport(pub.slug);
+
+      expect(retrieved).not.toBeNull();
+      expect(retrieved!.messages).toBeDefined();
+      expect(retrieved!.messages!).toHaveLength(2);
+      expect(retrieved!.messages![0].content).toBe("Analyze NVDA");
+    });
+  });
+
+  describe("putJobState and getJobState", () => {
+    it("persists and retrieves job state", async () => {
+      const job = {
+        jobId: "job-persist-test",
+        slug: "test-slug",
+        status: "running" as const,
+        query: "Analyze NVDA",
+        reasoningLevel: "x-light",
+        attachments: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        progress: [{ stage: "classifying", message: "Analyzing...", percent: 5 }],
+        traceEvents: [],
+        workLog: { plan: [], invocations: [], reasoning: [] },
+        currentReport: null,
+        domainProfile: null,
+        error: null,
+        listenerCount: 3, // Should be excluded from persistence
+      };
+
+      await putJobState("job-persist-test", job as any);
+      const retrieved = await getJobState("job-persist-test");
+
+      expect(retrieved).not.toBeNull();
+      expect(retrieved!.jobId).toBe("job-persist-test");
+      expect(retrieved!.status).toBe("running");
+      expect(retrieved!.progress).toHaveLength(1);
+      // listenerCount should NOT be persisted
+      expect((retrieved as any).listenerCount).toBeUndefined();
+    });
+
+    it("returns null for non-existent job", async () => {
+      const result = await getJobState("nonexistent-job");
+      expect(result).toBeNull();
+    });
+  });
+
+  describe("generateSlug", () => {
+    it("generates slug from ticker", () => {
+      const slug = generateSlug({ ticker: "AAPL", title: "Apple Inc" } as Report["meta"]);
+      expect(slug).toMatch(/^aapl-[a-z0-9]+$/);
+    });
+
+    it("generates slug from title when no ticker", () => {
+      const slug = generateSlug({ title: "Market Analysis Report" } as Report["meta"]);
+      expect(slug).toMatch(/^market-analysis-report-[a-z0-9]+$/);
+    });
+
+    it("handles special characters in slug", () => {
+      const slug = generateSlug({ ticker: "BRK.B", title: "Berkshire Hathaway" } as Report["meta"]);
+      expect(slug).toMatch(/^brk-b-[a-z0-9]+$/);
+    });
+
+    it("truncates long slugs", () => {
+      const slug = generateSlug({ title: "A Very Long Report Title That Should Be Truncated For Good Measure" } as Report["meta"]);
+      // Base should be max 30 chars + dash + 4 char suffix
+      expect(slug.length).toBeLessThanOrEqual(36);
     });
   });
 });

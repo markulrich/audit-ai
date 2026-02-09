@@ -305,5 +305,56 @@ describe("attachments", () => {
       expect(attachment.extractedText).toContain("Hello PDF");
       expect(attachment.extractedText).toContain("World");
     });
+
+    it("extracts text from PDF with TJ array operators", async () => {
+      // TJ operator with array of strings and positioning values
+      const pdfContent = "stream\n[(Hello ) -100 (World)] TJ\nendstream";
+      const buffer = Buffer.from(pdfContent, "latin1");
+      const attachment = await uploadAttachment("pdf-tj-arr", "doc.pdf", "application/pdf", buffer);
+
+      expect(attachment.extractedText).toContain("Hello ");
+      expect(attachment.extractedText).toContain("World");
+    });
+
+    it("extracts text from PDF with ' operator", async () => {
+      const pdfContent = "stream\n(Next line text) '\nendstream";
+      const buffer = Buffer.from(pdfContent, "latin1");
+      const attachment = await uploadAttachment("pdf-quote", "doc.pdf", "application/pdf", buffer);
+
+      expect(attachment.extractedText).toContain("Next line text");
+    });
+
+    it("handles PDF escape sequences in text", async () => {
+      // Test \\n and \\( and \\) escape sequences
+      const pdfContent = "stream\n(Line 1\\nLine 2) Tj\n(Parens \\(here\\)) Tj\nendstream";
+      const buffer = Buffer.from(pdfContent, "latin1");
+      const attachment = await uploadAttachment("pdf-escapes", "doc.pdf", "application/pdf", buffer);
+
+      expect(attachment.extractedText).toContain("Line 1\nLine 2");
+      expect(attachment.extractedText).toContain("Parens (here)");
+    });
+
+    it("deduplicates consecutive identical PDF strings", async () => {
+      // Some PDFs render the same text twice due to overlay
+      const pdfContent = "stream\n(Duplicate) Tj\n(Duplicate) Tj\n(Unique) Tj\nendstream";
+      const buffer = Buffer.from(pdfContent, "latin1");
+      const attachment = await uploadAttachment("pdf-dedup", "doc.pdf", "application/pdf", buffer);
+
+      // Should only have "Duplicate" once followed by "Unique"
+      expect(attachment.extractedText).toBe("Duplicate Unique");
+    });
+
+    it("extracts text from multiple PDF streams", async () => {
+      const pdfContent = [
+        "stream\n(Stream 1) Tj\nendstream",
+        "other content between streams",
+        "stream\n(Stream 2) Tj\nendstream",
+      ].join("\n");
+      const buffer = Buffer.from(pdfContent, "latin1");
+      const attachment = await uploadAttachment("pdf-multi", "doc.pdf", "application/pdf", buffer);
+
+      expect(attachment.extractedText).toContain("Stream 1");
+      expect(attachment.extractedText).toContain("Stream 2");
+    });
   });
 });
