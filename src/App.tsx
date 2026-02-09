@@ -118,7 +118,7 @@ export default function App() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [liveProgress, setLiveProgress] = useState<ProgressEvent[]>([]);
   const [liveError, setLiveError] = useState<ErrorInfo | null>(null);
-  const [reasoningLevel, setReasoningLevel] = useState<string>("heavy");
+  const [reasoningLevel, setReasoningLevel] = useState<string>("x-light");
   const [reportVersion, setReportVersion] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
 

@@ -6,7 +6,7 @@ import type { ReasoningConfig } from "../shared/types";
  * X-Light: Minimum everything — for fast testing
  * Light:   Reduced scope, still uses haiku
  * Heavy:   Full production quality with sonnet
- * X-Heavy: Maximum depth with opus
+ * X-Heavy: Maximum reasoning with opus
  */
 
 export const REASONING_LEVELS: Record<string, ReasoningConfig> = {
@@ -85,7 +85,7 @@ export const REASONING_LEVELS: Record<string, ReasoningConfig> = {
 
   "x-heavy": {
     label: "X-Heavy",
-    description: "Maximum depth — opus, most thorough",
+    description: "Maximum reasoning — opus, most thorough",
 
     classifierModel: "claude-sonnet-4-5",
     researcherModel: "claude-opus-4-6",
@@ -107,7 +107,7 @@ export const REASONING_LEVELS: Record<string, ReasoningConfig> = {
   },
 };
 
-export const DEFAULT_REASONING_LEVEL = "heavy";
+export const DEFAULT_REASONING_LEVEL = "x-light";
 
 export function getReasoningConfig(level: string): ReasoningConfig {
   return REASONING_LEVELS[level] || REASONING_LEVELS[DEFAULT_REASONING_LEVEL];
