@@ -206,6 +206,12 @@ export default function App() {
     }
   }, []);
 
+  const handleRetrySave = useCallback(() => {
+    if (currentReport) {
+      autoSave(currentReport, messages, slug);
+    }
+  }, [currentReport, messages, slug, autoSave]);
+
   const handleNewConversation = useCallback(() => {
     if (abortRef.current) {
       abortRef.current.abort();
@@ -707,6 +713,7 @@ export default function App() {
               onBack={handleNewConversation}
               slug={slug}
               saveState={saveState}
+              onRetrySave={handleRetrySave}
             />
           ) : (
             <ReportView
@@ -715,6 +722,7 @@ export default function App() {
               onBack={handleNewConversation}
               slug={slug}
               saveState={saveState}
+              onRetrySave={handleRetrySave}
             />
           )
         ) : (
