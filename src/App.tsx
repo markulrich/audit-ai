@@ -269,6 +269,7 @@ export default function App() {
     setIsGenerating(true);
     setLiveProgress([]);
     setLiveError(null);
+    setCurrentTraceData([]);
 
     const newVersion = reportVersion + 1;
 
@@ -519,7 +520,7 @@ export default function App() {
 
   // ── Handle send from ChatPanel (follow-up queries on report page) ─────────
   const handleSend = useCallback(async (userMessage: string) => {
-    await startPipeline(userMessage, slug!);
+    await startPipeline(userMessage, slug || "");
   }, [startPipeline, slug]);
 
   // ── Utility routes ────────────────────────────────────────────────────────

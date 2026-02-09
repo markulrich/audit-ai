@@ -83,7 +83,7 @@ export default function QueryInput({ onSubmit, disabled, reasoningLevel, onReaso
               letterSpacing: 0.3,
             }}
           >
-            {disabled ? "Generating..." : "Generate"}
+            {disabled ? "Classifying..." : "Generate"}
           </button>
         </div>
       </form>

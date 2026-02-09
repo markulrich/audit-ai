@@ -89,13 +89,7 @@ export function generateSlug(meta: Report["meta"]): string {
 
 /** Generate a slug from a domain profile (used by classify endpoint before report exists). */
 export function generateSlugFromProfile(ticker: string, companyName: string): string {
-  const base = (ticker && ticker !== "N/A" ? ticker : companyName || "report")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 30);
-  const suffix = Math.random().toString(36).slice(2, 6);
-  return `${base}-${suffix}`;
+  return generateSlug({ ticker: ticker !== "N/A" ? ticker : undefined, title: companyName } as Report["meta"]);
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────────
