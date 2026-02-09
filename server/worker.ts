@@ -801,8 +801,27 @@ async function main(): Promise<void> {
   }
 }
 
+// Graceful shutdown handler
+function setupGracefulShutdown(): void {
+  const shutdown = async (signal: string) => {
+    console.log(`[worker] Received ${signal}, shutting down gracefully...`);
+
+    if (state.status === "running") {
+      state.status = "failed";
+      state.error = `Worker interrupted by ${signal}`;
+      await persistState();
+    }
+
+    process.exit(signal === "SIGTERM" ? 0 : 1);
+  };
+
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
+}
+
 // Only run main if this is the worker process (not imported)
 if (process.env.WORKER_MODE === "true") {
+  setupGracefulShutdown();
   main();
 }
 

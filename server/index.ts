@@ -24,6 +24,8 @@ import {
   startJob,
   completeJob,
   failJob,
+  cancelJob,
+  isJobCancelled,
   createJobSendFn,
   subscribeToJob,
   addAttachmentToJob,
@@ -423,7 +425,7 @@ async function runJobInProcess(
     const report = await runOrchestrator({
       query: job.query,
       send,
-      isAborted: () => false, // Jobs don't abort when tab closes
+      isAborted: () => isJobCancelled(jobId), // Check for user cancellation
       reasoningLevel: job.reasoningLevel,
       conversationContext: job.conversationContext,
       preClassified,
@@ -570,6 +572,23 @@ app.get("/api/jobs", (_req: Request, res: Response) => {
   res.json({ jobs: listJobs() });
 });
 
+// ── Cancel a job ─────────────────────────────────────────────────────────────
+
+app.post("/api/jobs/:jobId/cancel", async (req: Request, res: Response) => {
+  const cancelled = await cancelJob(req.params.jobId);
+  if (!cancelled) {
+    return res.status(400).json({ error: "Job cannot be cancelled (not found or already complete)" });
+  }
+
+  // If there's a machine, destroy it
+  const machineId = getMachineForJob(req.params.jobId);
+  if (machineId) {
+    destroyMachine(machineId).catch(() => {});
+  }
+
+  res.json({ success: true, message: "Job cancelled" });
+});
+
 // ── Get the latest job for a report slug ─────────────────────────────────────
 
 app.get("/api/reports/:slug/job", (req: Request, res: Response) => {
@@ -586,6 +605,12 @@ app.get("/api/reports/:slug/job", (req: Request, res: Response) => {
 
 app.post("/api/reports/:slug/attachments", async (req: Request, res: Response) => {
   const slug = req.params.slug;
+
+  // Validate slug format to prevent path traversal
+  if (!slug || !/^[a-z0-9-]+$/.test(slug)) {
+    return res.status(400).json({ error: "Invalid slug format" });
+  }
+
   const filename = (req.headers["x-filename"] as string) || "upload";
   const mimeType = (req.headers["content-type"] as string) || "application/octet-stream";
   const buffer = req.body as Buffer;

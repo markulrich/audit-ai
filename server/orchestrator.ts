@@ -296,7 +296,17 @@ export async function runOrchestrator(opts: OrchestratorOptions): Promise<Report
     }
 
     try {
-      const invocation = await executeSkill(step.skill as SkillName, ctx, input);
+      // Per-skill timeout: 5 minutes for research/synthesize/verify, 2 minutes for others
+      const timeoutMs = ["research", "synthesize", "verify"].includes(step.skill)
+        ? 5 * 60 * 1000
+        : 2 * 60 * 1000;
+
+      const invocation = await Promise.race([
+        executeSkill(step.skill as SkillName, ctx, input),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`Skill "${step.skill}" timed out after ${timeoutMs / 1000}s`)), timeoutMs)
+        ),
+      ]);
       workLog.invocations.push(invocation);
       step.status = invocation.status === "completed" ? "completed" : "failed";
 

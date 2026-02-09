@@ -317,5 +317,33 @@ export function cleanupOldJobs(maxAgeMs: number = 24 * 60 * 60 * 1000): void {
   }
 }
 
+/** Cancel a running or queued job */
+export async function cancelJob(jobId: string): Promise<boolean> {
+  const job = jobs.get(jobId);
+  if (!job) return false;
+
+  if (job.status !== "queued" && job.status !== "running") {
+    return false; // Can only cancel active jobs
+  }
+
+  await updateJob(jobId, {
+    status: "failed",
+    completedAt: new Date().toISOString(),
+    error: { message: "Job cancelled by user" },
+  });
+
+  broadcastJobEvent(jobId, "job_status", { status: "failed" });
+  broadcastJobEvent(jobId, "error", { message: "Job cancelled by user" });
+
+  return true;
+}
+
+/** Check if a job has been cancelled */
+export function isJobCancelled(jobId: string): boolean {
+  const job = jobs.get(jobId);
+  if (!job) return true;
+  return job.status === "failed" && job.error?.message === "Job cancelled by user";
+}
+
 // Run cleanup every hour
 setInterval(() => cleanupOldJobs(), 60 * 60 * 1000);
