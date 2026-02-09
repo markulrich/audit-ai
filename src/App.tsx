@@ -4,6 +4,7 @@ import QueryInput from "./components/QueryInput";
 import ProgressStream from "./components/ProgressStream";
 import Report_ from "./components/Report";
 import ReportsPage from "./components/ReportsPage";
+import HealthPage from "./components/HealthPage";
 
 function isReportPayload(value: unknown): value is Report {
   return (
@@ -58,9 +59,13 @@ function isReportsListRoute() {
   return window.location.pathname === "/reports" || window.location.pathname === "/reports/";
 }
 
+function isHealthRoute() {
+  return window.location.pathname === "/health" || window.location.pathname === "/health/";
+}
+
 export default function App() {
-  const [state, setState] = useState<"idle" | "loading" | "loading-published" | "done" | "error" | "reports-list">(
-    () => isReportsListRoute() ? "reports-list" : getPublishedSlug() ? "loading-published" : "idle"
+  const [state, setState] = useState<"idle" | "loading" | "loading-published" | "done" | "error" | "reports-list" | "health">(
+    () => isHealthRoute() ? "health" : isReportsListRoute() ? "reports-list" : getPublishedSlug() ? "loading-published" : "idle"
   );
   const [progress, setProgress] = useState<ProgressEvent[]>([]);
   const [report, setReport] = useState<Report | null>(null);
@@ -266,6 +271,10 @@ export default function App() {
 
   if (state === "done" && report) {
     return <Report_ data={report} traceData={traceData} onBack={handleReset} publishedSlug={publishedSlug} />;
+  }
+
+  if (state === "health") {
+    return <HealthPage onBack={handleReset} />;
   }
 
   if (state === "reports-list") {

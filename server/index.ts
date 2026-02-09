@@ -13,6 +13,7 @@ import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { runPipeline } from "./pipeline";
 import { publishReport, getReport, listReports } from "./storage";
+import { getHealthStatus } from "./health";
 
 import "./anthropic-client";
 
@@ -90,6 +91,19 @@ setInterval(() => {
 if (process.env.NODE_ENV === "production") {
   app.use(express.static(join(__dirname, "..", "dist")));
 }
+
+// ── Health check endpoint ────────────────────────────────────────────────────
+
+app.get("/api/health", async (_req: Request, res: Response) => {
+  try {
+    const health = await getHealthStatus();
+    const statusCode = health.status === "healthy" ? 200 : 503;
+    res.status(statusCode).json(health);
+  } catch (err: unknown) {
+    console.error("Health check error:", err);
+    res.status(500).json({ status: "unhealthy", error: "Health check failed" });
+  }
+});
 
 // ── SSE endpoint: generate an explainable report ────────────────────────────
 
