@@ -79,6 +79,9 @@ function sseSerialize(data: unknown): string {
 // Track concurrent uploads per slug to prevent abuse
 const activeUploads = new Map<string, number>();
 
+// Request timeout for non-SSE API endpoints (30 seconds)
+const API_TIMEOUT_MS = 30_000;
+
 // ── Middleware ───────────────────────────────────────────────────────────────
 
 app.use(express.json({ limit: "100kb" }));
@@ -176,7 +179,15 @@ app.post("/api/classify", rateLimit, async (req: Request, res: Response) => {
 
   try {
     const config = getReasoningConfig(reasoningLevel ?? "x-light");
-    const classifierResult = await classifyDomain(query.trim(), undefined, config);
+
+    // Add timeout to classify call to prevent indefinite hanging
+    const classifierResult = await Promise.race([
+      classifyDomain(query.trim(), undefined, config),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(Object.assign(new Error("Classification timed out"), { status: 504 })), API_TIMEOUT_MS)
+      ),
+    ]);
+
     const domainProfile = classifierResult.result;
     const trace = classifierResult.trace;
     const slug = generateSlugFromProfile(domainProfile.ticker, domainProfile.companyName);
@@ -188,6 +199,8 @@ app.post("/api/classify", rateLimit, async (req: Request, res: Response) => {
 
     const message = err.keyMissing
       ? "ANTHROPIC_API_KEY is not set."
+      : err.status === 504
+      ? "Classification timed out. Please try again."
       : err.status === 401 || err.status === 403
       ? `API key rejected (HTTP ${err.status}).`
       : err.status === 429
