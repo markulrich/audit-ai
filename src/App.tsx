@@ -386,6 +386,30 @@ export default function App() {
       .catch((err) => {
         if (err.name === "AbortError") return;
         console.error("Job event stream error:", err);
+
+        // Auto-reconnect on network errors (if job might still be running)
+        if (!receivedReport && !receivedError && jobId) {
+          console.log(`[app] Reconnecting to job ${jobId} in 3s...`);
+          setTimeout(() => {
+            // Re-check if the job is still active before reconnecting
+            fetch(`/api/jobs/${jobId}`)
+              .then((res) => res.ok ? res.json() : null)
+              .then((job) => {
+                if (job && (job.status === "running" || job.status === "queued")) {
+                  connectToJobEvents(jobId);
+                } else {
+                  setIsGenerating(false);
+                  setCurrentJobId(null);
+                }
+              })
+              .catch(() => {
+                setIsGenerating(false);
+                setCurrentJobId(null);
+              });
+          }, 3000);
+          return;
+        }
+
         setIsGenerating(false);
         setCurrentJobId(null);
       });
@@ -449,11 +473,21 @@ export default function App() {
     window.history.pushState(null, "", "/");
   }, []);
 
-  const handleAbort = useCallback(() => {
+  const handleAbort = useCallback(async () => {
     if (abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;
     }
+
+    // Cancel the background job if one is running
+    if (currentJobId) {
+      try {
+        await fetch(`/api/jobs/${currentJobId}/cancel`, { method: "POST" });
+      } catch {
+        // Best effort — job may have already completed
+      }
+    }
+
     setIsGenerating(false);
     setCurrentJobId(null);
 
@@ -470,7 +504,7 @@ export default function App() {
     ]);
     setLiveProgress([]);
     setLiveError(null);
-  }, [liveProgress]);
+  }, [liveProgress, currentJobId]);
 
   // ── Start a job via the new job API ────────────────────────────────────────
   const startJobPipeline = useCallback(async (userMessage: string, pipelineSlug: string) => {
