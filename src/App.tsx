@@ -323,7 +323,7 @@ export default function App() {
             fontWeight: 500,
           }}
         >
-          Explainable Research Reports
+          What should I research?
         </p>
       </div>
 
