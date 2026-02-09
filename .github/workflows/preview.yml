@@ -57,6 +57,22 @@ jobs:
             flyctl storage update "$TIGRIS_BUCKET" --app "$PREVIEW_APP"
           fi
 
+      - name: Verify S3/Tigris env vars are set
+        run: |
+          secrets=$(flyctl secrets list --app "$PREVIEW_APP" --json)
+          missing=""
+          for var in BUCKET_NAME AWS_ENDPOINT_URL_S3 AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
+            if ! echo "$secrets" | jq -e ".[] | select(.Name == \"$var\")" > /dev/null 2>&1; then
+              missing="$missing $var"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing Tigris S3 env vars on $PREVIEW_APP:$missing"
+            echo "Run 'fly storage update $TIGRIS_BUCKET --app $PREVIEW_APP' or set them manually."
+            exit 1
+          fi
+          echo "All required S3 env vars are set."
+
       - name: Set Anthropic key
         run: |
           flyctl secrets set ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
