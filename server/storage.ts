@@ -13,8 +13,8 @@
  * and AWS_REGION as secrets on the app — no manual config needed.
  */
 
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
-import { readFile, writeFile, mkdir } from "fs/promises";
+import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
+import { readFile, writeFile, mkdir, readdir } from "fs/promises";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import type { Report } from "../shared/types";
@@ -162,13 +162,6 @@ export async function publishReport(
   meta!.ticker = report.meta?.ticker || meta!.ticker;
   await putObject(`reports/${slug}/meta.json`, meta);
 
-  // Update the slug index
-  const index = await getObject<string[]>("reports/index.json") || [];
-  if (!index.includes(slug)) {
-    index.push(slug);
-    await putObject("reports/index.json", index);
-  }
-
   return { slug, version, url: `/reports/${slug}` };
 }
 
@@ -192,7 +185,40 @@ export async function getReport(
 }
 
 export async function listReports(): Promise<SlugMeta[]> {
-  const slugs = await getObject<string[]>("reports/index.json") || [];
+  const slugs: string[] = [];
+
+  if (useS3) {
+    let continuationToken: string | undefined;
+    do {
+      const resp = await s3!.send(
+        new ListObjectsV2Command({
+          Bucket: BUCKET,
+          Prefix: "reports/",
+          Delimiter: "/",
+          ContinuationToken: continuationToken,
+        })
+      );
+      for (const prefix of resp.CommonPrefixes || []) {
+        // prefix.Prefix is e.g. "reports/my-slug/"
+        const slug = prefix.Prefix?.replace(/^reports\//, "").replace(/\/$/, "");
+        if (slug) slugs.push(slug);
+      }
+      continuationToken = resp.NextContinuationToken;
+    } while (continuationToken);
+  } else {
+    // Keys like "reports/{slug}/meta.json" are stored under LOCAL_DATA_DIR,
+    // so slug directories live at LOCAL_DATA_DIR/reports/{slug}/
+    try {
+      const reportsDir = join(LOCAL_DATA_DIR, "reports");
+      const entries = await readdir(reportsDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) slugs.push(entry.name);
+      }
+    } catch (thrown: unknown) {
+      if ((thrown as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw thrown;
+    }
+  }
 
   const metas: SlugMeta[] = [];
   for (const slug of slugs) {

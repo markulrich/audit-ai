@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { rm } from "fs/promises";
+import { mkdir, rm, writeFile } from "fs/promises";
 import { publishReport, getReport, listReports } from "./storage";
 import type { Report } from "../shared/types";
 
@@ -84,16 +84,19 @@ describe("storage", () => {
       expect(list[0].currentVersion).toBe(2);
     });
 
-    it("does not duplicate slug in index on re-publish", async () => {
-      const report = makeReport({ title: "Dedup Test", ticker: "DUP" });
-      const pub = await publishReport(report);
+    it("skips orphan directories without meta.json", async () => {
+      // Create an orphan slug directory with no meta.json
+      const orphanDir = join(DATA_DIR, "reports", "reports", "orphan-slug");
+      await mkdir(orphanDir, { recursive: true });
+      await writeFile(join(orphanDir, "stale.txt"), "not json");
 
-      // Re-publish to same slug multiple times
-      await publishReport(report, pub.slug);
-      await publishReport(report, pub.slug);
+      // Also publish a real report
+      const report = makeReport({ title: "Real Report", ticker: "REAL" });
+      await publishReport(report);
 
       const list = await listReports();
       expect(list).toHaveLength(1);
+      expect(list[0].title).toBe("Real Report");
     });
   });
 
