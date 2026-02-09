@@ -3,6 +3,7 @@ import type { CreateMessageParams } from "../anthropic-client";
 import type {
   DomainProfileBase,
   DomainProfile,
+  OutputFormat,
   ReasoningConfig,
   SendFn,
   AgentResult,
@@ -13,6 +14,7 @@ import type {
 /** Shape of the JSON the classifier LLM returns. */
 interface ClassifierResponse {
   domain: string;
+  outputFormat?: OutputFormat;
   ticker?: string;
   companyName?: string;
   focusAreas?: string[];
@@ -23,6 +25,7 @@ const DOMAIN_PROFILES: Record<string, DomainProfileBase> = {
   equity_research: {
     domain: "equity_research",
     domainLabel: "Equity Research",
+    defaultOutputFormat: "written_report",
     sourceHierarchy: [
       "sec_filings",
       "earnings_calls",
@@ -49,12 +52,44 @@ const DOMAIN_PROFILES: Record<string, DomainProfileBase> = {
       ratingOptions: ["Overweight", "Equal-Weight", "Underweight"],
     },
   },
-  // Future: deal_memo, scientific_review, geopolitical_analysis
+  pitch_deck: {
+    domain: "pitch_deck",
+    domainLabel: "Pitch Deck",
+    defaultOutputFormat: "slide_deck",
+    sourceHierarchy: [
+      "market_research_reports",
+      "industry_analysis",
+      "company_data",
+      "competitive_intelligence",
+      "news_and_press",
+      "academic_research",
+    ],
+    certaintyRubric: "factual_verification",
+    evidenceStyle: "mixed",
+    contraryThreshold: "any_contradiction_lowers_score",
+    toneTemplate: "startup_pitch",
+    sections: [
+      "title_slide",
+      "problem",
+      "solution",
+      "market_opportunity",
+      "business_model",
+      "traction",
+      "competitive_landscape",
+      "team",
+      "financials",
+      "the_ask",
+    ],
+    reportMeta: {
+      ratingOptions: [],
+    },
+  },
 };
 
 /**
  * Classifies the user query into a domain and returns the appropriate profile.
- * For V1, we only support equity_research but the architecture supports expansion.
+ * Also determines the output format (written_report or slide_deck).
+ * The user can request a non-default format (e.g., "slide deck of NVIDIA financials").
  */
 export async function classifyDomain(
   query: string,
@@ -70,18 +105,38 @@ export async function classifyDomain(
   const params: CreateMessageParams = {
     model: config.classifierModel || ANTHROPIC_MODEL,
     system: `You are a query classifier for DoublyAI, an explainable research platform.
-Given a user query, identify the research domain, company, and focus areas.
+Given a user query, determine:
+1. Which research domain it belongs to
+2. What output format to use
 
-Supported domains: equity_research (stock/company analysis). Default to this for V1.
+RESEARCH DOMAINS (determines what kind of research to do):
+- equity_research: Stock analysis, company financials, earnings, market data, analyst ratings, price targets, competitive positioning of public companies.
+- pitch_deck: Startup pitches, business plans, investor presentations, company pitch decks, product launches, fundraising materials.
+
+OUTPUT FORMATS (determines how to present the research):
+- written_report: Traditional written research report with sections and flowing prose. Default for equity_research.
+- slide_deck: Slide-based presentation format with concise bullet points per slide. Default for pitch_deck.
+
+The user can override the default format. For example:
+- "Analyze NVIDIA" → equity_research + written_report (default)
+- "Pitch deck for a fintech startup" → pitch_deck + slide_deck (default)
+- "Make a slide deck about Tesla's financials" → equity_research + slide_deck (override)
+- "Write a detailed report on an AI startup pitch" → pitch_deck + written_report (override)
+
+Supported domains: equity_research, pitch_deck. Default to equity_research if unclear.
 ${contextNote}
 Respond with JSON only:
 {
-  "domain": "equity_research",
+  "domain": "equity_research" | "pitch_deck",
+  "outputFormat": "written_report" | "slide_deck",
   "ticker": "NVDA",
   "companyName": "NVIDIA Corporation",
   "focusAreas": ["financials", "competition", "product_roadmap"],
   "timeframe": "current"
-}`,
+}
+
+For pitch_deck queries, ticker may be empty and companyName should be the company/product name or concept being pitched.
+If the query doesn't clearly match either domain, use your best judgment based on the intent.`,
     messages: [{ role: "user" as const, content: `<user_query>\n${query}\n</user_query>` }],
   };
 
@@ -109,8 +164,16 @@ Respond with JSON only:
     const text = firstBlock && "text" in firstBlock ? (firstBlock as { text: string }).text : undefined;
     if (!text) throw new Error("Empty classifier response");
     const json: ClassifierResponse = JSON.parse(text.replace(/```json\n?|\n?```/g, "").trim());
+
+    const domain = json.domain && DOMAIN_PROFILES[json.domain] ? json.domain : "equity_research";
+    const profile = DOMAIN_PROFILES[domain];
+    const outputFormat: OutputFormat = json.outputFormat === "written_report" || json.outputFormat === "slide_deck"
+      ? json.outputFormat
+      : profile.defaultOutputFormat;
+
     const result: DomainProfile = {
-      ...DOMAIN_PROFILES.equity_research,
+      ...profile,
+      outputFormat,
       ticker: json.ticker || "N/A",
       companyName: json.companyName || query,
       focusAreas: json.focusAreas || [],
@@ -120,6 +183,7 @@ Respond with JSON only:
   } catch {
     const result: DomainProfile = {
       ...DOMAIN_PROFILES.equity_research,
+      outputFormat: "written_report",
       ticker: "N/A",
       companyName: query,
       focusAreas: [],

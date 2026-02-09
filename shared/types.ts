@@ -1,3 +1,7 @@
+// ── Output Format ───────────────────────────────────────────────────────────
+
+export type OutputFormat = "written_report" | "slide_deck";
+
 // ── Evidence ────────────────────────────────────────────────────────────────
 
 export interface EvidenceItem {
@@ -50,7 +54,10 @@ export type ContentItem = FindingRef | TextContent | BreakContent;
 export interface Section {
   id: string;
   title: string;
+  subtitle?: string;
+  layout?: "title" | "content" | "two-column" | "stats" | "bullets";
   content: ContentItem[];
+  speakerNotes?: string;
 }
 
 // ── Report Meta ─────────────────────────────────────────────────────────────
@@ -68,6 +75,7 @@ export interface ReportMeta {
   title: string;
   subtitle?: string;
   date?: string;
+  outputFormat?: OutputFormat;
   rating?: string;
   priceTarget?: string;
   currentPrice?: string;
@@ -77,6 +85,10 @@ export interface ReportMeta {
   keyStats?: KeyStat[];
   overallCertainty?: number;
   methodology?: MethodologyData;
+  // Pitch-deck specific
+  companyDescription?: string;
+  fundingAsk?: string;
+  tagline?: string;
 }
 
 // ── Report ──────────────────────────────────────────────────────────────────
@@ -92,6 +104,7 @@ export interface Report {
 export interface DomainProfileBase {
   domain: string;
   domainLabel: string;
+  defaultOutputFormat: OutputFormat;
   sourceHierarchy: string[];
   certaintyRubric: string;
   evidenceStyle: string;
@@ -108,6 +121,7 @@ export interface DomainProfile extends DomainProfileBase {
   companyName: string;
   focusAreas: string[];
   timeframe: string;
+  outputFormat: OutputFormat;
 }
 
 // ── Reasoning Config ────────────────────────────────────────────────────────

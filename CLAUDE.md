@@ -5,7 +5,7 @@
 DoublyAI is an **explainable research platform** that generates professional-grade research reports where every factual claim ("Finding") is interactive — click it to see the Explanation panel with sources, reasoning, certainty scores, and supporting/contrary evidence.
 
 **Target market:** Enterprise teams in financial services and VC (deal memos).
-**V1 scope:** Equity research reports only. Architecture supports future domains (deal memo, scientific review, geopolitical analysis).
+**V1 scope:** Equity research reports and pitch deck slide presentations. Architecture supports future domains (deal memo, scientific review, geopolitical analysis).
 
 ## Tech Stack
 
@@ -20,10 +20,10 @@ DoublyAI is an **explainable research platform** that generates professional-gra
 User Query → Classifier → Researcher → Synthesizer → Verifier → Report
 ```
 
-1. **Classifier** (`server/agents/classifier.js`) — Identifies domain, extracts ticker/company
-2. **Researcher** (`server/agents/researcher.js`) — Gathers 40+ evidence items with sources
-3. **Synthesizer** (`server/agents/synthesizer.js`) — Drafts findings woven into prose sections
-4. **Verifier** (`server/agents/verifier.js`) — Adversarial fact-checker, assigns certainty scores, removes weak findings
+1. **Classifier** (`server/agents/classifier.ts`) — Identifies domain + output format, extracts ticker/company
+2. **Researcher** (`server/agents/researcher.ts`) — Gathers 40+ evidence items with sources (domain-aware prompts)
+3. **Synthesizer** (`server/agents/synthesizer.ts`) — Drafts findings as written report or slide deck
+4. **Verifier** (`server/agents/verifier.ts`) — Adversarial fact-checker, assigns certainty scores, removes weak findings
 
 All agents share a single Anthropic client (`server/anthropic-client.js`) with 120s timeout and 2 retries.
 
@@ -54,11 +54,25 @@ This lets the Report component dynamically render interactive findings inline wi
 - **25-49%**: Weak/speculative
 - **<25%**: Auto-removed by verifier
 
+### Research Tasks vs Output Formats
+The system separates two independent concepts:
+
+**Research Task** (domain) — determines what to research:
+- `equity_research`: Stock analysis, financials, competitive positioning (sections: investment_thesis, recent_price_action, etc.)
+- `pitch_deck`: Market analysis, competitive landscape, value propositions (sections: title_slide, problem, solution, market_opportunity, etc.)
+
+**Output Format** — determines how to present findings:
+- `written_report`: Traditional prose report with sections and flowing text. Default for equity_research.
+- `slide_deck`: Slide-based presentation with concise bullet points. Default for pitch_deck.
+
+These can be mixed: "Make a slide deck about Tesla's financials" → equity_research domain + slide_deck format.
+
 ### Domain Profiles
-Configurable rubrics per research domain. V1 ships only `equity_research`. Located in `classifier.js` as `DOMAIN_PROFILES` constant. Each profile defines:
+Configurable rubrics per research domain. Located in `classifier.ts` as `DOMAIN_PROFILES` constant. Each profile defines:
+- Default output format (`defaultOutputFormat`)
 - Source hierarchy (what sources are most authoritative)
 - Certainty rubric style
-- Evidence style (quantitative vs qualitative)
+- Evidence style (quantitative vs qualitative vs mixed)
 - Tone template
 - Section structure
 - Report meta options (e.g., rating options)
@@ -86,9 +100,10 @@ doublyai/
 │   ├── App.jsx                  ← State machine (idle→loading→done|error)
 │   ├── index.css                ← Minimal global styles
 │   └── components/
-│       ├── QueryInput.jsx       ← Input with example query chips
-│       ├── ProgressStream.jsx   ← 4-stage streaming progress UI
-│       └── Report.jsx           ← Full interactive report with explanation panel
+│       ├── QueryInput.tsx       ← Input with example query chips
+│       ├── ProgressStream.tsx   ← 4-stage streaming progress UI
+│       ├── Report.tsx           ← Full interactive written report with explanation panel
+│       └── SlideDeck.tsx        ← Slide deck presentation with explanation panel
 ├── package.json
 ├── vite.config.js               ← Proxies /api to Express backend
 ├── index.html                   ← Entry HTML (loads Inter font)
@@ -160,9 +175,33 @@ The Verifier produces a `meta.methodology` object with an `explanation` containi
 
 ### Section IDs (canonical):
 
-`investment_thesis`, `recent_price_action`, `financial_performance`, `product_and_technology`, `competitive_landscape`, `industry_and_macro`, `key_risks`, `analyst_consensus`
+**Equity Research:** `investment_thesis`, `recent_price_action`, `financial_performance`, `product_and_technology`, `competitive_landscape`, `industry_and_macro`, `key_risks`, `analyst_consensus`
 
-Report.jsx has a SECTION_TITLES map that also handles short forms (thesis, price, financials, etc.) but agents should use the canonical long-form IDs.
+**Pitch Deck:** `title_slide`, `problem`, `solution`, `market_opportunity`, `business_model`, `traction`, `competitive_landscape`, `team`, `financials`, `the_ask`
+
+Report.tsx and SlideDeck.tsx have SECTION_TITLES maps. Agents should use the canonical long-form IDs.
+
+### Section Schema (slide deck extensions):
+
+For slide deck output, sections include additional optional fields:
+```json
+{
+  "id": "problem",
+  "title": "The Problem",
+  "subtitle": "Optional subtitle",
+  "layout": "title" | "content" | "two-column" | "stats" | "bullets",
+  "content": [...],
+  "speakerNotes": "Expanded talking points for the presenter..."
+}
+```
+
+### ReportMeta extensions:
+
+For pitch deck output, meta includes additional fields:
+- `outputFormat`: `"written_report"` or `"slide_deck"` — controls which frontend component renders
+- `tagline`: One-liner value proposition
+- `companyDescription`: 2-3 sentence description
+- `fundingAsk`: Funding ask summary
 
 ## Running Locally
 
@@ -190,6 +229,9 @@ fly deploy
 - Interactive report with Finding/Explanation UX
 - Security hardening (rate limiting, input validation, prompt injection guards, error sanitization, API key validation)
 - UX fixes (stale closure bug, AbortController, keyboard navigation, mobile responsive layout, browser tab title, empty state handling, orphaned finding cleanup)
+- Pitch deck domain profile with slide deck output format
+- Separated research task (domain) from output format — either can be combined independently
+- SlideDeck.tsx component with dark theme, slide navigation, and explanation panel
 
 ### Not Yet Done
 - Live web search integration (V1 uses Claude's training knowledge only)
