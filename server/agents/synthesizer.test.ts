@@ -163,4 +163,65 @@ describe("synthesizer agent", () => {
       expect(result.meta).toBeDefined();
     });
   });
+
+  // ── Slide deck format ─────────────────────────────────────────────────
+  describe("slide deck format", () => {
+    it("parses slide deck JSON response", async () => {
+      const slideDeckProfile = {
+        ...domainProfile,
+        domain: "pitch_deck",
+        outputFormat: "slide_deck",
+      } as DomainProfile;
+
+      const slideReport: Report = {
+        meta: {
+          title: "TechStartup Pitch",
+          subtitle: "Investor Presentation",
+          outputFormat: "slide_deck",
+          tagline: "AI-powered solutions",
+          keyStats: [],
+        },
+        sections: [
+          {
+            id: "title_slide",
+            title: "Title",
+            layout: "title",
+            content: [],
+          },
+          {
+            id: "problem",
+            title: "The Problem",
+            layout: "content",
+            content: [
+              { type: "finding", id: "f1" },
+            ],
+            speakerNotes: "Key talking point about the problem.",
+          },
+        ],
+        findings: [
+          {
+            id: "f1",
+            section: "problem",
+            text: "The market lacks an AI solution for legal research",
+            explanation: {
+              title: "Market Gap",
+              text: "No existing product addresses this need.",
+              supportingEvidence: [
+                { source: "Industry Report", quote: "Legal tech is underserved", url: "general" },
+              ],
+              contraryEvidence: [],
+            },
+          },
+        ],
+      };
+
+      mockAiResponse(JSON.stringify(slideReport));
+
+      const { result } = await synthesize("pitch deck for AI legal tech", slideDeckProfile, evidence, undefined);
+      expect(result.meta.outputFormat).toBe("slide_deck");
+      expect(result.sections[0].layout).toBe("title");
+      expect(result.sections[1].speakerNotes).toBe("Key talking point about the problem.");
+      expect(result.findings).toHaveLength(1);
+    });
+  });
 });

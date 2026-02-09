@@ -319,4 +319,92 @@ describe("verifier agent", () => {
       expect(result.meta.overallCertainty).toBe(80); // mean of [80, 80]
     });
   });
+
+  // ── Slide deck field preservation ──────────────────────────────────────
+
+  describe("slide deck field preservation", () => {
+    it("preserves layout and speakerNotes through verification", async () => {
+      const slideProfile = {
+        ...domainProfile,
+        domain: "pitch_deck",
+        outputFormat: "slide_deck",
+      } as DomainProfile;
+
+      const slideDraft = makeDraft();
+      slideDraft.sections = [
+        {
+          id: "title_slide",
+          title: "Title",
+          layout: "title",
+          content: [],
+        },
+        {
+          id: "problem",
+          title: "The Problem",
+          layout: "content",
+          content: [
+            { type: "finding", id: "f1" },
+          ],
+          speakerNotes: "Discuss the core problem.",
+        },
+      ];
+
+      const verifiedSlideReport = {
+        ...makeDraft(),
+        meta: { title: "Startup Pitch", overallCertainty: 75 },
+        sections: [
+          {
+            id: "title_slide",
+            title: "Title",
+            layout: "title",
+            content: [],
+          },
+          {
+            id: "problem",
+            title: "The Problem",
+            layout: "content",
+            content: [
+              { type: "finding", id: "f1" },
+            ],
+            speakerNotes: "Discuss the core problem.",
+          },
+        ],
+        findings: [
+          { ...slideDraft.findings[0], certainty: 75 },
+        ],
+      };
+
+      mockAiResponse(JSON.stringify(verifiedSlideReport));
+
+      const { result } = await verify("pitch deck", slideProfile, slideDraft as any, undefined);
+      expect(result.sections[0].layout).toBe("title");
+      expect(result.sections[1].speakerNotes).toBe("Discuss the core problem.");
+      expect(result.findings[0].certainty).toBe(75);
+    });
+
+    it("preserves title_slide section even with no findings", async () => {
+      const slideProfile = {
+        ...domainProfile,
+        domain: "pitch_deck",
+        outputFormat: "slide_deck",
+      } as DomainProfile;
+
+      const verifiedReport = makeVerifiedReport();
+      verifiedReport.sections = [
+        {
+          id: "title_slide",
+          title: "Title",
+          layout: "title",
+          content: [{ type: "text", value: "Our Company" }],
+        },
+        ...verifiedReport.sections,
+      ];
+
+      mockAiResponse(JSON.stringify(verifiedReport));
+
+      const { result } = await verify("pitch deck", slideProfile, makeDraft() as any, undefined);
+      const titleSlide = result.sections.find((s) => s.id === "title_slide");
+      expect(titleSlide).toBeDefined();
+    });
+  });
 });
