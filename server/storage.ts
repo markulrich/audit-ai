@@ -11,7 +11,7 @@
  * and AWS_REGION as secrets on the app — no manual config needed.
  */
 
-import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command, HeadBucketCommand } from "@aws-sdk/client-s3";
 import type { Report } from "../shared/types";
 
 // ── S3 client ─────────────────────────────────────────────────────────────────
@@ -183,4 +183,18 @@ export async function listReports(): Promise<SlugMeta[]> {
   // Sort by most recently updated first
   metas.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
   return metas;
+}
+
+// ── Health check ────────────────────────────────────────────────────────────────
+
+export async function checkS3Health(): Promise<{ ok: boolean; bucket: string | undefined; endpoint: string | undefined; error?: string }> {
+  if (!BUCKET) return { ok: false, bucket: BUCKET, endpoint: S3_ENDPOINT, error: "BUCKET_NAME is not set" };
+  if (!S3_ENDPOINT) return { ok: false, bucket: BUCKET, endpoint: S3_ENDPOINT, error: "AWS_ENDPOINT_URL_S3 is not set" };
+
+  try {
+    await s3.send(new HeadBucketCommand({ Bucket: BUCKET }));
+    return { ok: true, bucket: BUCKET, endpoint: S3_ENDPOINT };
+  } catch (err: unknown) {
+    return { ok: false, bucket: BUCKET, endpoint: S3_ENDPOINT, error: err instanceof Error ? err.message : String(err) };
+  }
 }

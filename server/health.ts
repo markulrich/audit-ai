@@ -1,10 +1,9 @@
-import { S3Client, HeadBucketCommand } from "@aws-sdk/client-s3";
 import { client as anthropicClient, ANTHROPIC_MODEL } from "./anthropic-client";
+import { checkS3Health } from "./storage";
 import { execSync } from "child_process";
 import { readFileSync, existsSync } from "fs";
-import { join } from "path";
+import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { dirname } from "path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -40,20 +39,6 @@ function loadBuildInfo(): BuildInfo {
 const buildInfo = loadBuildInfo();
 const serverStartTime = new Date().toISOString();
 
-// ── S3 client for health check ───────────────────────────────────────────────
-
-const BUCKET = process.env.BUCKET_NAME;
-const S3_ENDPOINT = process.env.AWS_ENDPOINT_URL_S3;
-
-const s3 = new S3Client({
-  region: process.env.AWS_REGION || "auto",
-  endpoint: S3_ENDPOINT,
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID || "",
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "",
-  },
-});
-
 // ── Health check logic ───────────────────────────────────────────────────────
 
 interface ServiceStatus {
@@ -75,7 +60,6 @@ async function checkAnthropic(): Promise<ServiceStatus> {
   }
 
   try {
-    // Minimal API call: 1 token response with haiku (cheapest model)
     await anthropicClient.messages.create({
       model: "claude-haiku-4-5",
       max_tokens: 1,
@@ -99,30 +83,30 @@ async function checkAnthropic(): Promise<ServiceStatus> {
 
 async function checkS3(): Promise<ServiceStatus> {
   const start = Date.now();
+  const result = await checkS3Health();
 
-  if (!BUCKET || !S3_ENDPOINT) {
+  if (!result.ok && (result.error?.includes("not set"))) {
     return {
       status: "unconfigured",
       latencyMs: Date.now() - start,
-      error: !BUCKET ? "BUCKET_NAME is not set" : "AWS_ENDPOINT_URL_S3 is not set",
+      error: result.error,
     };
   }
 
-  try {
-    await s3.send(new HeadBucketCommand({ Bucket: BUCKET }));
-    return {
-      status: "ok",
-      latencyMs: Date.now() - start,
-      details: { bucket: BUCKET, endpoint: S3_ENDPOINT },
-    };
-  } catch (err: unknown) {
-    const error = err instanceof Error ? err.message : String(err);
+  if (!result.ok) {
     return {
       status: "error",
       latencyMs: Date.now() - start,
-      error,
+      error: result.error,
+      details: { bucket: result.bucket, endpoint: result.endpoint },
     };
   }
+
+  return {
+    status: "ok",
+    latencyMs: Date.now() - start,
+    details: { bucket: result.bucket, endpoint: result.endpoint },
+  };
 }
 
 export interface HealthResponse {
@@ -163,7 +147,6 @@ function formatUptime(ms: number): string {
 }
 
 export async function getHealthStatus(): Promise<HealthResponse> {
-  // Run all checks in parallel
   const [anthropic, s3Status] = await Promise.all([
     checkAnthropic(),
     checkS3(),
