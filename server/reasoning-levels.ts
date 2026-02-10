@@ -35,6 +35,10 @@ export const REASONING_LEVELS: Record<string, ReasoningConfig> = {
     methodologyLength: "1 sentence",
     methodologySources: "1",
     removalThreshold: 0, // keep all findings regardless of certainty
+
+    // Speed optimizations
+    skipVerifier: true, // assign default certainty scores instead of LLM call
+    parallelDraftAndResearch: true, // run draft answer + research concurrently
   },
 
   light: {
