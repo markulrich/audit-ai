@@ -65,23 +65,7 @@ interface PipelineSummaryOutput {
   avgCertainty?: number;
 }
 
-// ─── Constants ───────────────────────────────────────────────────────────────
-
-const COLORS = {
-  bg: "#fafafa",
-  cardBg: "#ffffff",
-  text: "#1a1a2e",
-  textSecondary: "#555770",
-  textMuted: "#8a8ca5",
-  border: "#e2e4ea",
-  accent: "#1a1a2e",
-  green: "#15803d",
-  orange: "#b45309",
-  red: "#b91c1c",
-  panelBg: "#f7f7fa",
-  codeBg: "#1e1e2e",
-  codeText: "#cdd6f4",
-} as const;
+import { COLORS } from "../constants";
 
 const STAGE_META: Record<string, StageMeta> = {
   classifier: {

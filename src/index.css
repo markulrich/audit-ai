@@ -28,6 +28,11 @@ input:focus {
   outline: none;
 }
 
+textarea:focus-visible,
+input:focus-visible {
+  box-shadow: 0 0 0 2px #1a1a2e40;
+}
+
 /* Mobile bottom sheet animations */
 @keyframes sheetSlideUp {
   from { transform: translateY(100%); }

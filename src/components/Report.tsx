@@ -429,7 +429,7 @@ export default function Report({ data, traceData, onBack, slug, saveState, onRet
             role="button"
             tabIndex={0}
             aria-label={`Overall report certainty: ${overallCertainty}%. Click for methodology.`}
-            onKeyDown={(e: ReactKeyboardEvent<HTMLDivElement>) => { if (e.key === "Enter") handleActivate("overview"); }}
+            onKeyDown={(e: ReactKeyboardEvent<HTMLDivElement>) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleActivate("overview"); } }}
             style={{
               cursor: "pointer",
               display: "flex",

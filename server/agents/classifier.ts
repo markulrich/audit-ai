@@ -1,5 +1,6 @@
 import { tracedCreate, ANTHROPIC_MODEL } from "../anthropic-client";
 import type { CreateMessageParams } from "../anthropic-client";
+import { stripCodeFences } from "../json-utils";
 import type {
   DomainProfileBase,
   DomainProfile,
@@ -156,7 +157,7 @@ Respond with JSON only:
     const firstBlock = response.content?.[0];
     const text = firstBlock && "text" in firstBlock ? (firstBlock as { text: string }).text : undefined;
     if (!text) throw new Error("Empty classifier response");
-    const json: ClassifierResponse = JSON.parse(text.replace(/```json\n?|\n?```/g, "").trim());
+    const json: ClassifierResponse = JSON.parse(stripCodeFences(text));
 
     const domainKey = json.domain && DOMAIN_PROFILES[json.domain] ? json.domain : "equity_research";
     const profile = DOMAIN_PROFILES[domainKey];

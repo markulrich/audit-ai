@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { EXAMPLES, REASONING_LEVELS } from "../constants";
+import type { ReasoningLevelOption } from "../constants";
 
 interface Props {
   onSubmit: (query: string) => void;
@@ -6,26 +8,6 @@ interface Props {
   reasoningLevel: string;
   onReasoningLevelChange: (level: string) => void;
 }
-
-interface ReasoningLevelOption {
-  value: string;
-  label: string;
-  description: string;
-}
-
-const EXAMPLES: string[] = [
-  "Analyze NVIDIA (NVDA)",
-  "Deep dive on Tesla's competitive position",
-  "Pitch deck for an AI-powered legal tech startup",
-  "Slide deck on Apple's financial performance",
-];
-
-const REASONING_LEVELS: ReasoningLevelOption[] = [
-  { value: "x-light", label: "X-Light", description: "Fastest — for testing" },
-  { value: "light", label: "Light", description: "Faster — reduced scope" },
-  { value: "heavy", label: "Heavy", description: "Full quality" },
-  { value: "x-heavy", label: "X-Heavy", description: "Maximum reasoning" },
-];
 
 export default function QueryInput({ onSubmit, disabled, reasoningLevel, onReasoningLevelChange }: Props) {
   const [query, setQuery] = useState<string>("");

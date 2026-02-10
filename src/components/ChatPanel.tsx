@@ -1,42 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import type { ChatMessage, ProgressEvent, ErrorInfo, TraceEvent } from "../../shared/types";
 import ProgressStream from "./ProgressStream";
-
-const COLORS = {
-  bg: "#f7f7fa",
-  cardBg: "#ffffff",
-  text: "#1a1a2e",
-  textSecondary: "#555770",
-  textMuted: "#8a8ca5",
-  border: "#e2e4ea",
-  accent: "#1a1a2e",
-  green: "#15803d",
-  orange: "#b45309",
-  red: "#b91c1c",
-  userBubble: "#1a1a2e",
-  userText: "#ffffff",
-  assistantBubble: "#ffffff",
-} as const;
-
-const EXAMPLES: string[] = [
-  "Analyze NVIDIA (NVDA)",
-  "Deep dive on Tesla's competitive position",
-  "Palantir equity research report",
-  "Apple financial analysis and outlook",
-];
-
-interface ReasoningLevelOption {
-  value: string;
-  label: string;
-  description: string;
-}
-
-const REASONING_LEVELS: ReasoningLevelOption[] = [
-  { value: "x-light", label: "X-Light", description: "Fastest — for testing" },
-  { value: "light", label: "Light", description: "Faster — reduced scope" },
-  { value: "heavy", label: "Heavy", description: "Full quality" },
-  { value: "x-heavy", label: "X-Heavy", description: "Maximum reasoning" },
-];
+import { COLORS, EXAMPLES, REASONING_LEVELS } from "../constants";
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
