@@ -42,6 +42,7 @@ function FindingSpan({ finding, isActive, onActivate }: FindingSpanProps) {
         position: "relative",
         borderBottom: `2px solid ${active ? color : color + "40"}`,
         paddingBottom: 1,
+        margin: "0 2px",
         transition: "all 0.2s ease",
         backgroundColor: active ? color + "08" : "transparent",
         borderRadius: active ? 2 : 0,
