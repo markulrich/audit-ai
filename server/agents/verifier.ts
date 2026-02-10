@@ -5,6 +5,7 @@ import type {
   Finding,
   Section,
   ContentItem,
+  EvidenceItem,
   ReasoningConfig,
   SendFn,
   AgentResult,
@@ -12,30 +13,6 @@ import type {
   PipelineError,
   ConversationContext,
 } from "../../shared/types";
-
-/**
- * Computes a dynamic removal threshold based on the quality distribution
- * of verified findings. When evidence quality is high, we can be more
- * selective. When quality is low, we keep everything and let the certainty
- * scores tell the story.
- *
- * The key insight: the more high-certainty findings you have, the higher
- * the bar should be for what gets included. This prevents low-quality
- * findings from diluting an otherwise strong report.
- */
-export function computeDynamicThreshold(findings: Finding[]): number {
-  if (findings.length === 0) return 0;
-
-  const scores = findings.map((f) => f.certainty || 0).sort((a, b) => a - b);
-  const median = scores[Math.floor(scores.length / 2)];
-
-  // High-quality report: be more selective
-  if (median >= 85) return 40;
-  if (median >= 70) return 30;
-  if (median >= 50) return 20;
-  // Low-quality evidence overall: keep everything, show uncertainty
-  return 0;
-}
 
 /**
  * Removes finding references from section content arrays when the finding
@@ -77,15 +54,21 @@ function cleanOrphanedRefs(report: Report): void {
 /**
  * Verification Agent — the adversarial skeptic.
  *
- * Reviews every finding, searches for contradictions,
- * assigns certainty scores, and removes weak findings.
+ * Reviews every finding against the raw evidence collected by the researcher,
+ * searches for contradictions, assigns certainty scores, and may remove
+ * findings that have no evidence backing.
  *
  * THIS AGENT'S JOB IS TO LOWER CERTAINTY, NOT RAISE IT.
+ *
+ * The verifier receives both the draft report AND the raw evidence so it can
+ * judge whether findings accurately represent the collected data and whether
+ * there's sufficient evidence to support each claim.
  */
 export async function verify(
   query: string,
   domainProfile: DomainProfile,
   draft: Report,
+  evidence: EvidenceItem[],
   send: SendFn | undefined,
   config: Partial<ReasoningConfig> = {},
   conversationContext?: ConversationContext,
@@ -125,22 +108,34 @@ Do NOT remove or modify these fields.
 `
     : "";
 
+  const evidenceSummary = Array.isArray(evidence) && evidence.length > 0
+    ? `\n\nRAW EVIDENCE (${evidence.length} items collected by researcher):\n${JSON.stringify(evidence, null, 2)}\n\nUse this evidence to judge each finding. A finding backed by multiple high-authority evidence items deserves higher certainty. A finding with no evidence backing should score very low.`
+    : "";
+
   const params = {
     ...(config.verifierModel && { model: config.verifierModel }),
     system: `You are an adversarial fact-checker reviewing a draft ${formatLabel} on ${companyName} (${ticker}).
 
 Be skeptical. Challenge every claim. Your job is to catch errors before they reach the client.
 ${contextSection}${slideFieldInstruction}
+You are given both the draft report AND the raw evidence that was collected. Use the evidence to judge each finding:
+
 For each finding:
-1. Verify factual accuracy against your knowledge
-2. Add contradicting evidence or caveats as "contraryEvidence"
-3. Assign a certainty score (1-99%):
-   - 95-99%: Factual, 3+ corroborating sources, 0 contradictions
-   - 85-94%: Strong, 2+ sources agree
+1. Check if the finding is supported by the raw evidence provided
+2. Verify factual accuracy against your knowledge
+3. Add contradicting evidence or caveats as "contraryEvidence"
+4. Assign a certainty score (1-99%):
+   - 95-99%: Factual, backed by 3+ corroborating evidence items, 0 contradictions
+   - 85-94%: Strong, 2+ evidence items agree
    - 70-84%: Moderate, credible with caveats or forward-looking
-   - 50-69%: Mixed, significant uncertainty
-   - 25-49%: Weak or speculative
-   - 1-24%: Very weak, mostly unverifiable — but still include in output
+   - 50-69%: Mixed, significant uncertainty or weak evidence
+   - 25-49%: Weak or speculative, little evidence support
+   - 1-24%: Very weak, no real evidence backing
+
+CRITICAL RULES FOR REMOVAL:
+- The more high-certainty findings you have, the HIGHER your bar should be for keeping weaker ones. If most findings are 85%+, remove anything below ~40%. If most findings are moderate (60-80%), keep everything above ~25%.
+- If evidence quality is poor overall (few items, weak sources), keep ALL findings but score them low. A report full of 30-50% findings is better than an empty report.
+- NEVER remove all findings. The report must always contain results — even if certainty is very low.
 
 Output schema (frontend depends on exact placement):
 - "certainty" at finding ROOT level (not inside explanation)
@@ -149,7 +144,6 @@ Output schema (frontend depends on exact placement):
 
 Also:
 - Add "overallCertainty" to meta (arithmetic mean of remaining finding scores)
-- Keep ALL findings in the output — do not remove any, even very low scoring ones. The system will filter based on overall evidence quality.
 - You may improve explanation text to add context or corrections
 - Don't change meta or section structure (except removing deleted finding refs)
 
@@ -160,7 +154,7 @@ Return complete report JSON. No markdown fences.`,
     messages: [
       {
         role: "user" as const,
-        content: `Review this draft ${formatLabel} on ${companyName} (${ticker}). Be skeptical — find errors, weak claims, and missing caveats.\n\n${JSON.stringify(draft, null, 2)}`,
+        content: `Review this draft ${formatLabel} on ${companyName} (${ticker}). Be skeptical — find errors, weak claims, and missing caveats.${evidenceSummary}\n\nDRAFT REPORT:\n${JSON.stringify(draft, null, 2)}`,
       },
     ],
   };
@@ -212,18 +206,8 @@ Return complete report JSON. No markdown fences.`,
       report.sections = draft.sections || report.sections;
     }
 
-    // Apply dynamic threshold based on evidence quality distribution
-    const dynamicThreshold = computeDynamicThreshold(report.findings || []);
-    if (dynamicThreshold > 0 && report.findings?.length > 0) {
-      const filtered = report.findings.filter((f) => (f.certainty || 0) >= dynamicThreshold);
-      // Never produce an empty report — if threshold would remove everything, keep all
-      if (filtered.length > 0) {
-        report.findings = filtered;
-      }
-    }
-
-    // Compute overallCertainty from remaining findings
-    if (report.findings?.length > 0) {
+    // Compute overallCertainty from findings
+    if (!report.meta.overallCertainty && report.findings?.length > 0) {
       report.meta.overallCertainty = Math.round(
         report.findings.reduce((s: number, f: Finding) => s + (f.certainty || 50), 0) /
           report.findings.length
@@ -249,7 +233,6 @@ Return complete report JSON. No markdown fences.`,
         parsedOutput: {
           findingsCount: report.findings?.length || 0,
           overallCertainty: report.meta?.overallCertainty,
-          dynamicThreshold,
           removedFindings,
           certaintySummary,
         },
@@ -297,17 +280,7 @@ Return complete report JSON. No markdown fences.`,
       try {
         const report: Report = extracted;
         if (!report.meta) report.meta = {} as Report["meta"];
-
-        // Apply dynamic threshold based on evidence quality
-        const dynamicThreshold = computeDynamicThreshold(report.findings || []);
-        if (dynamicThreshold > 0 && report.findings?.length > 0) {
-          const filtered = report.findings.filter((f) => (f.certainty || 0) >= dynamicThreshold);
-          if (filtered.length > 0) {
-            report.findings = filtered;
-          }
-        }
-
-        if (report.findings?.length > 0) {
+        if (!report.meta.overallCertainty && report.findings?.length > 0) {
           report.meta.overallCertainty = Math.round(
             report.findings.reduce((s: number, f: Finding) => s + (f.certainty || 50), 0) /
               report.findings.length
@@ -316,7 +289,7 @@ Return complete report JSON. No markdown fences.`,
         cleanOrphanedRefs(report);
         return {
           result: report,
-          trace: { ...trace, parseWarning: "Extracted via regex fallback", parsedOutput: { dynamicThreshold } },
+          trace: { ...trace, parseWarning: "Extracted via regex fallback" },
         };
       } catch (parseErr) {
         console.error("Verification agent regex fallback parse error:", (parseErr as PipelineError).message);

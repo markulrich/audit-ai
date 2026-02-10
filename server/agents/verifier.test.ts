@@ -4,6 +4,7 @@ import type {
   ReportMeta,
   DomainProfile,
   Finding,
+  EvidenceItem,
   Section,
 } from "../../shared/types";
 
@@ -12,7 +13,7 @@ vi.mock("../anthropic-client", (): { tracedCreate: Mock } => ({
   tracedCreate: vi.fn(),
 }));
 
-import { verify, computeDynamicThreshold } from "./verifier";
+import { verify } from "./verifier";
 import { tracedCreate } from "../anthropic-client";
 
 const mockedTracedCreate = tracedCreate as Mock;
@@ -51,6 +52,12 @@ const slideDeckProfile = {
   companyName: "Test Corp",
   outputFormat: "slide_deck",
 } as DomainProfile;
+
+/** Minimal evidence array for tests */
+const testEvidence: EvidenceItem[] = [
+  { source: "SEC Filing", quote: "Revenue was $10B", url: "https://sec.gov/filing/123", category: "financial_data", authority: "official_filing" },
+  { source: "Gartner", quote: "40% market share", url: "https://gartner.com/report/456", category: "market_data", authority: "industry_report" },
+];
 
 /** Builds a minimal valid draft (the output of the synthesizer stage). */
 function makeDraft({ includeMeta = true, findings }: MakeDraftOptions = {}): Draft {
@@ -151,7 +158,7 @@ describe("verifier agent", () => {
     const expected = makeVerifiedReport();
     mockAiResponse(JSON.stringify(expected));
 
-    const { result } = await verify("test query", domainProfile, makeDraft() as unknown as Report, undefined);
+    const { result } = await verify("test query", domainProfile, makeDraft() as unknown as Report, testEvidence, undefined);
     expect(result.findings).toHaveLength(2);
     expect(result.findings[0].certainty).toBe(80);
     expect(result.meta.overallCertainty).toBe(80);
@@ -161,21 +168,12 @@ describe("verifier agent", () => {
     const expected = makeVerifiedReport();
     mockAiResponse("```json\n" + JSON.stringify(expected) + "\n```");
 
-    const { result } = await verify("test query", domainProfile, makeDraft() as unknown as Report, undefined);
+    const { result } = await verify("test query", domainProfile, makeDraft() as unknown as Report, testEvidence, undefined);
     expect(result.findings).toHaveLength(2);
     expect(result.meta.overallCertainty).toBe(80);
   });
 
   // ── Bug #1 fix: handle missing meta in AI response ─────────────────────
-  //
-  // Previously, when the AI returned valid JSON but omitted "meta",
-  // line 156 threw: report.meta.overallCertainty → TypeError
-  // The TypeError cascaded through all fallback paths, silently
-  // discarding the AI's verified certainty scores and returning
-  // the draft with default certainty=60.
-  //
-  // After fix: meta is initialized if missing, AI's certainty scores
-  // are preserved, and overallCertainty is computed.
 
   describe("handles missing meta in AI response (was Bug #1)", () => {
     it("preserves AI certainty scores and initializes meta when missing", async () => {
@@ -183,12 +181,10 @@ describe("verifier agent", () => {
       delete badReport.meta;
       mockAiResponse(JSON.stringify(badReport));
 
-      const { result } = await verify("test query", domainProfile, makeDraft() as unknown as Report, undefined);
+      const { result } = await verify("test query", domainProfile, makeDraft() as unknown as Report, testEvidence, undefined);
 
-      // AI's certainty=80 should be preserved, not replaced by default 60
       expect(result.findings[0].certainty).toBe(80);
       expect(result.findings[1].certainty).toBe(80);
-      // meta should be auto-initialized with computed overallCertainty
       expect(result.meta).toBeDefined();
       expect(result.meta.overallCertainty).toBe(80);
     });
@@ -198,7 +194,7 @@ describe("verifier agent", () => {
       badReport.meta = null;
       mockAiResponse(JSON.stringify(badReport));
 
-      const { result } = await verify("test query", domainProfile, makeDraft() as unknown as Report, undefined);
+      const { result } = await verify("test query", domainProfile, makeDraft() as unknown as Report, testEvidence, undefined);
 
       expect(result.findings[0].certainty).toBe(80);
       expect(result.meta).toBeDefined();
@@ -207,14 +203,6 @@ describe("verifier agent", () => {
   });
 
   // ── Bug #2 fix: handle missing draft.meta in fallback ───────────────────
-  //
-  // Previously, when the AI response failed to parse AND the original
-  // draft had no meta, line 196 threw:
-  //   draft.meta.overallCertainty = ... → TypeError
-  // This caused verify() to reject entirely, crashing the pipeline.
-  //
-  // After fix: draft.meta is initialized if missing, and the function
-  // gracefully returns the draft with default certainty scores.
 
   describe("handles missing draft.meta in last-resort fallback (was Bug #2)", () => {
     it("returns draft with defaults when AI response is empty and draft has no meta", async () => {
@@ -223,9 +211,8 @@ describe("verifier agent", () => {
       const draftWithoutMeta = makeDraft({ includeMeta: false });
       delete draftWithoutMeta.meta;
 
-      const { result } = await verify("test query", domainProfile, draftWithoutMeta as unknown as Report, undefined);
+      const { result } = await verify("test query", domainProfile, draftWithoutMeta as unknown as Report, testEvidence, undefined);
 
-      // Should not throw — should return draft with default scores
       expect(result.findings[0].certainty).toBe(60);
       expect(result.meta).toBeDefined();
       expect(result.meta.overallCertainty).toBe(60);
@@ -237,7 +224,7 @@ describe("verifier agent", () => {
       const draftWithNullMeta = makeDraft();
       draftWithNullMeta.meta = null;
 
-      const { result } = await verify("test query", domainProfile, draftWithNullMeta as unknown as Report, undefined);
+      const { result } = await verify("test query", domainProfile, draftWithNullMeta as unknown as Report, testEvidence, undefined);
 
       expect(result.findings[0].certainty).toBe(60);
       expect(result.meta).toBeDefined();
@@ -250,7 +237,7 @@ describe("verifier agent", () => {
       const draftWithoutMeta = makeDraft({ includeMeta: false });
       delete draftWithoutMeta.meta;
 
-      const { result } = await verify("test query", domainProfile, draftWithoutMeta as unknown as Report, undefined);
+      const { result } = await verify("test query", domainProfile, draftWithoutMeta as unknown as Report, testEvidence, undefined);
 
       expect(result.findings[0].certainty).toBe(60);
       expect(result.meta).toBeDefined();
@@ -258,12 +245,6 @@ describe("verifier agent", () => {
   });
 
   // ── Bug #3 fix: proper JSON extraction from AI commentary ──────────────
-  //
-  // Previously, the greedy regex /\{[\s\S]*\}/ matched from the first
-  // "{" in commentary to the last "}", capturing invalid JSON.
-  //
-  // After fix: the code walks through each '{' and tries JSON.parse
-  // from that offset, finding the actual report object.
 
   describe("extracts JSON from AI commentary (was Bug #3)", () => {
     it("extracts correct JSON when response has brace characters in commentary", async () => {
@@ -275,9 +256,8 @@ describe("verifier agent", () => {
 
       mockAiResponse(aiResponse);
 
-      const { result } = await verify("test query", domainProfile, makeDraft() as unknown as Report, undefined);
+      const { result } = await verify("test query", domainProfile, makeDraft() as unknown as Report, testEvidence, undefined);
 
-      // Should extract the actual JSON object and preserve certainty=80
       expect(result.findings[0].certainty).toBe(80);
       expect(result.meta.overallCertainty).toBe(80);
     });
@@ -290,7 +270,7 @@ describe("verifier agent", () => {
 
       mockAiResponse(aiResponse);
 
-      const { result } = await verify("test query", domainProfile, makeDraft() as unknown as Report, undefined);
+      const { result } = await verify("test query", domainProfile, makeDraft() as unknown as Report, testEvidence, undefined);
 
       expect(result.findings[0].certainty).toBe(80);
     });
@@ -305,7 +285,7 @@ describe("verifier agent", () => {
       report.findings = report.findings.filter((f) => f.id !== "f2");
       mockAiResponse(JSON.stringify(report));
 
-      const { result } = await verify("test query", domainProfile, makeDraft() as unknown as Report, undefined);
+      const { result } = await verify("test query", domainProfile, makeDraft() as unknown as Report, testEvidence, undefined);
       const contentIds = result.sections[0].content
         .filter((c) => c.type === "finding")
         .map((c) => (c as { type: "finding"; id: string }).id);
@@ -323,7 +303,7 @@ describe("verifier agent", () => {
       delete report.meta!.overallCertainty;
       mockAiResponse(JSON.stringify(report));
 
-      const { result } = await verify("test query", domainProfile, makeDraft() as unknown as Report, undefined);
+      const { result } = await verify("test query", domainProfile, makeDraft() as unknown as Report, testEvidence, undefined);
       expect(result.meta.overallCertainty).toBe(80); // mean of [80, 80]
     });
   });
@@ -345,7 +325,7 @@ describe("verifier agent", () => {
       };
       mockAiResponse(JSON.stringify(report));
 
-      const { result } = await verify("test query", makeSlideProfile(), makeDraft() as unknown as Report, undefined);
+      const { result } = await verify("test query", makeSlideProfile(), makeDraft() as unknown as Report, testEvidence, undefined);
       expect(result.sections[0].layout).toBe("content");
       expect(result.sections[0].subtitle).toBe("Key Thesis Points");
       expect(result.sections[0].speakerNotes).toBe("Discuss the main investment thesis here.");
@@ -355,7 +335,7 @@ describe("verifier agent", () => {
       const report = makeVerifiedReport();
       mockAiResponse(JSON.stringify(report));
 
-      await verify("test query", makeSlideProfile(), makeDraft() as unknown as Report, undefined);
+      await verify("test query", makeSlideProfile(), makeDraft() as unknown as Report, testEvidence, undefined);
 
       const callArgs = mockedTracedCreate.mock.calls[0][0];
       expect(callArgs.system).toContain("slide deck");
@@ -380,103 +360,47 @@ describe("verifier agent", () => {
       });
       mockAiResponse(JSON.stringify(report));
 
-      const { result } = await verify("test query", slideProfile, makeDraft() as unknown as Report, undefined);
+      const { result } = await verify("test query", slideProfile, makeDraft() as unknown as Report, testEvidence, undefined);
       const titleSlide = result.sections.find((s) => s.id === "title_slide");
       expect(titleSlide).toBeDefined();
       expect(titleSlide!.content[0].type).toBe("text");
     });
   });
 
-  // ── Dynamic threshold ─────────────────────────────────────────────────
+  // ── Evidence-aware verification ────────────────────────────────────────
 
-  describe("computeDynamicThreshold", () => {
-    it("returns 0 for empty findings", () => {
-      expect(computeDynamicThreshold([])).toBe(0);
-    });
-
-    it("returns 0 when median certainty is below 50", () => {
-      const findings = [
-        { id: "f1", certainty: 20 },
-        { id: "f2", certainty: 30 },
-        { id: "f3", certainty: 40 },
-      ] as Finding[];
-      expect(computeDynamicThreshold(findings)).toBe(0);
-    });
-
-    it("returns 20 when median certainty is 50-69", () => {
-      const findings = [
-        { id: "f1", certainty: 40 },
-        { id: "f2", certainty: 60 },
-        { id: "f3", certainty: 65 },
-      ] as Finding[];
-      expect(computeDynamicThreshold(findings)).toBe(20);
-    });
-
-    it("returns 30 when median certainty is 70-84", () => {
-      const findings = [
-        { id: "f1", certainty: 50 },
-        { id: "f2", certainty: 75 },
-        { id: "f3", certainty: 80 },
-      ] as Finding[];
-      expect(computeDynamicThreshold(findings)).toBe(30);
-    });
-
-    it("returns 40 when median certainty is 85+", () => {
-      const findings = [
-        { id: "f1", certainty: 80 },
-        { id: "f2", certainty: 90 },
-        { id: "f3", certainty: 95 },
-      ] as Finding[];
-      expect(computeDynamicThreshold(findings)).toBe(40);
-    });
-  });
-
-  describe("dynamic threshold filtering in verify()", () => {
-    it("filters low-certainty findings when median is high", async () => {
-      const report = makeDraft();
-      report.findings[0] = { ...report.findings[0], certainty: 90 };
-      report.findings[1] = { ...report.findings[1], certainty: 15 };
-      // Add a third high-certainty finding so median >= 85
-      report.findings.push({
-        id: "f3",
-        section: "investment_thesis",
-        text: "Third finding",
-        certainty: 92,
-        explanation: { title: "T", text: "T", supportingEvidence: [], contraryEvidence: [] },
-      });
-      report.sections[0].content.push({ type: "finding", id: "f3" });
-      // median of [15, 90, 92] = 90 → threshold 40 → f2 (15%) removed
+  describe("evidence-aware verification", () => {
+    it("passes raw evidence to the verifier prompt", async () => {
+      const report = makeVerifiedReport();
       mockAiResponse(JSON.stringify(report));
 
-      const { result } = await verify("test query", domainProfile, makeDraft() as unknown as Report, undefined);
-      const ids = result.findings.map((f) => f.id);
-      expect(ids).toContain("f1");
-      expect(ids).not.toContain("f2");
-      expect(ids).toContain("f3");
+      await verify("test query", domainProfile, makeDraft() as unknown as Report, testEvidence, undefined);
+
+      const callArgs = mockedTracedCreate.mock.calls[0][0];
+      expect(callArgs.messages[0].content).toContain("RAW EVIDENCE");
+      expect(callArgs.messages[0].content).toContain("SEC Filing");
+      expect(callArgs.messages[0].content).toContain("Gartner");
     });
 
-    it("keeps all findings when median certainty is low", async () => {
-      const report = makeDraft();
-      report.findings[0] = { ...report.findings[0], certainty: 30 };
-      report.findings[1] = { ...report.findings[1], certainty: 25 };
-      // median of [25, 30] = 25 → threshold 0 → keep all
+    it("includes evidence count in prompt", async () => {
+      const report = makeVerifiedReport();
       mockAiResponse(JSON.stringify(report));
 
-      const { result } = await verify("test query", domainProfile, makeDraft() as unknown as Report, undefined);
-      expect(result.findings).toHaveLength(2);
-      expect(result.meta.overallCertainty).toBe(28); // mean of [25, 30]
+      await verify("test query", domainProfile, makeDraft() as unknown as Report, testEvidence, undefined);
+
+      const callArgs = mockedTracedCreate.mock.calls[0][0];
+      expect(callArgs.messages[0].content).toContain(`RAW EVIDENCE (${testEvidence.length} items`);
     });
 
-    it("never produces an empty report even if all findings are below threshold", async () => {
-      const report = makeDraft();
-      // All findings scored high except one scored 0 — but only 2 findings
-      // with median 45 → threshold 0, keeps all
-      report.findings[0] = { ...report.findings[0], certainty: 45 };
-      report.findings[1] = { ...report.findings[1], certainty: 10 };
+    it("handles empty evidence array gracefully", async () => {
+      const report = makeVerifiedReport();
       mockAiResponse(JSON.stringify(report));
 
-      const { result } = await verify("test query", domainProfile, makeDraft() as unknown as Report, undefined);
-      expect(result.findings.length).toBeGreaterThan(0);
+      await verify("test query", domainProfile, makeDraft() as unknown as Report, [], undefined);
+
+      const callArgs = mockedTracedCreate.mock.calls[0][0];
+      // No evidence section when array is empty
+      expect(callArgs.messages[0].content).not.toContain("RAW EVIDENCE");
     });
 
     it("falls back to draft findings when verifier returns 0 findings", async () => {
@@ -485,7 +409,7 @@ describe("verifier agent", () => {
       mockAiResponse(JSON.stringify(report));
 
       const draft = makeDraft() as unknown as Report;
-      const { result } = await verify("test query", domainProfile, draft, undefined);
+      const { result } = await verify("test query", domainProfile, draft, testEvidence, undefined);
       expect(result.findings.length).toBeGreaterThan(0);
       expect(result.findings[0].certainty).toBe(15);
     });
