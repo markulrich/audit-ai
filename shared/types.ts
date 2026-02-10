@@ -142,6 +142,8 @@ export interface ReasoningConfig {
   methodologyLength: string;
   methodologySources: string;
   removalThreshold: number;
+  skipVerifier?: boolean;
+  parallelDraftAndResearch?: boolean;
 }
 
 // ── Trace Types ─────────────────────────────────────────────────────────────

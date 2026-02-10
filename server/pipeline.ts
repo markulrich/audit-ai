@@ -141,48 +141,10 @@ export async function runPipeline(
   const isPitch = domainProfile.domain === "pitch_deck";
   const isSlides = domainProfile.outputFormat === "slide_deck";
 
-  // ── Stage 2: Draft Answer ──────────────────────────────────────────────────
-  send("progress", {
-    stage: "drafting_answer",
-    message: `Generating quick draft answer for ${domainProfile.companyName}...`,
-    percent: 12,
-    detail: `Fast Haiku call to produce an immediate draft answer while the full pipeline runs`,
-  });
+  // ── Stage 2 & 3: Draft Answer + Research ────────────────────────────────────
+  // When parallelDraftAndResearch is enabled, these run concurrently.
+  // Otherwise they run sequentially (draft answer first, then research).
 
-  let draftAnswerText: string = "";
-  let draftAnswerTrace: TraceData;
-  try {
-    const draftResult = await draftAnswer(query, domainProfile, send);
-    draftAnswerText = draftResult.result;
-    draftAnswerTrace = draftResult.trace;
-  } catch (err) {
-    // Draft answer is non-critical — log and continue
-    draftAnswerTrace = {};
-    console.warn("Draft answer failed (non-critical):", (err as Error).message);
-  }
-  if (isAborted()) return;
-
-  send("progress", {
-    stage: "answer_drafted",
-    message: "Draft answer ready",
-    percent: 14,
-    draftAnswer: draftAnswerText,
-    stats: {
-      model: draftAnswerTrace?.request?.model || "claude-haiku-4-5",
-      durationMs: draftAnswerTrace?.timing?.durationMs,
-      inputTokens: draftAnswerTrace?.response?.usage?.input_tokens,
-      outputTokens: draftAnswerTrace?.response?.usage?.output_tokens,
-    },
-  });
-
-  send("trace", {
-    stage: "draft_answer",
-    agent: "DraftAnswer",
-    trace: draftAnswerTrace || {},
-    intermediateOutput: draftAnswerText,
-  });
-
-  // ── Stage 3: Research ───────────────────────────────────────────────────────
   const researchSubsteps = isPitch
     ? [
         { text: "Market research and TAM/SAM/SOM", status: "active" },
@@ -201,25 +163,122 @@ export async function runPipeline(
         { text: "Risk factors (regulatory, geopolitical)", status: "active" },
       ];
 
-
-  send("progress", {
-    stage: "researching",
-    message: `Gathering evidence on ${domainProfile.companyName} (${domainProfile.ticker})...`,
-    percent: 15,
-    detail: `Collecting ${config.evidenceMinItems}+ data points across ${isPitch ? "market, competition, traction, and financials" : "financials, products, competition, risks, and analyst sentiment"}. Using ${config.researcherModel || ANTHROPIC_MODEL}.`,
-    substeps: researchSubsteps,
-  });
-
+  let draftAnswerText: string = "";
+  let draftAnswerTrace: TraceData;
   let evidence: EvidenceItem[];
   let researcherTrace: TraceData;
-  try {
-    const researcherResult = await research(query, domainProfile, send, config, conversationContext);
-    evidence = researcherResult.result;
-    researcherTrace = researcherResult.trace;
-  } catch (err) {
-    throw tagError(err as PipelineError, "researcher");
+
+  if (config.parallelDraftAndResearch) {
+    // Run both in parallel for speed
+    send("progress", {
+      stage: "researching",
+      message: `Gathering evidence on ${domainProfile.companyName} (${domainProfile.ticker})...`,
+      percent: 12,
+      detail: `Collecting ${config.evidenceMinItems}+ data points (draft answer running in parallel). Using ${config.researcherModel || ANTHROPIC_MODEL}.`,
+      substeps: researchSubsteps,
+    });
+
+    const [draftResult, researchResult] = await Promise.allSettled([
+      draftAnswer(query, domainProfile, send),
+      research(query, domainProfile, send, config, conversationContext),
+    ]);
+
+    // Handle draft answer (non-critical)
+    if (draftResult.status === "fulfilled") {
+      draftAnswerText = draftResult.value.result;
+      draftAnswerTrace = draftResult.value.trace;
+    } else {
+      draftAnswerTrace = {};
+      console.warn("Draft answer failed (non-critical):", draftResult.reason?.message);
+    }
+
+    // Handle research (critical)
+    if (researchResult.status === "fulfilled") {
+      evidence = researchResult.value.result;
+      researcherTrace = researchResult.value.trace;
+    } else {
+      throw tagError(researchResult.reason as PipelineError, "researcher");
+    }
+
+    if (isAborted()) return;
+
+    // Emit draft answer progress
+    send("progress", {
+      stage: "answer_drafted",
+      message: "Draft answer ready",
+      percent: 14,
+      draftAnswer: draftAnswerText,
+      stats: {
+        model: draftAnswerTrace?.request?.model || "claude-haiku-4-5",
+        durationMs: draftAnswerTrace?.timing?.durationMs,
+        inputTokens: draftAnswerTrace?.response?.usage?.input_tokens,
+        outputTokens: draftAnswerTrace?.response?.usage?.output_tokens,
+      },
+    });
+
+    send("trace", {
+      stage: "draft_answer",
+      agent: "DraftAnswer",
+      trace: draftAnswerTrace || {},
+      intermediateOutput: draftAnswerText,
+    });
+  } else {
+    // Sequential: draft answer first, then research
+    send("progress", {
+      stage: "drafting_answer",
+      message: `Generating quick draft answer for ${domainProfile.companyName}...`,
+      percent: 12,
+      detail: `Fast Haiku call to produce an immediate draft answer while the full pipeline runs`,
+    });
+
+    try {
+      const draftResult = await draftAnswer(query, domainProfile, send);
+      draftAnswerText = draftResult.result;
+      draftAnswerTrace = draftResult.trace;
+    } catch (err) {
+      // Draft answer is non-critical — log and continue
+      draftAnswerTrace = {};
+      console.warn("Draft answer failed (non-critical):", (err as Error).message);
+    }
+    if (isAborted()) return;
+
+    send("progress", {
+      stage: "answer_drafted",
+      message: "Draft answer ready",
+      percent: 14,
+      draftAnswer: draftAnswerText,
+      stats: {
+        model: draftAnswerTrace?.request?.model || "claude-haiku-4-5",
+        durationMs: draftAnswerTrace?.timing?.durationMs,
+        inputTokens: draftAnswerTrace?.response?.usage?.input_tokens,
+        outputTokens: draftAnswerTrace?.response?.usage?.output_tokens,
+      },
+    });
+
+    send("trace", {
+      stage: "draft_answer",
+      agent: "DraftAnswer",
+      trace: draftAnswerTrace || {},
+      intermediateOutput: draftAnswerText,
+    });
+
+    send("progress", {
+      stage: "researching",
+      message: `Gathering evidence on ${domainProfile.companyName} (${domainProfile.ticker})...`,
+      percent: 15,
+      detail: `Collecting ${config.evidenceMinItems}+ data points across ${isPitch ? "market, competition, traction, and financials" : "financials, products, competition, risks, and analyst sentiment"}. Using ${config.researcherModel || ANTHROPIC_MODEL}.`,
+      substeps: researchSubsteps,
+    });
+
+    try {
+      const researcherResult = await research(query, domainProfile, send, config, conversationContext);
+      evidence = researcherResult.result;
+      researcherTrace = researcherResult.trace;
+    } catch (err) {
+      throw tagError(err as PipelineError, "researcher");
+    }
+    if (isAborted()) return;
   }
-  if (isAborted()) return;
 
   // Compute evidence category breakdown
   const categoryCounts: Record<string, number> = {};
@@ -331,30 +390,132 @@ export async function runPipeline(
   });
 
   // ── Stage 4: Verify ─────────────────────────────────────────────────────────
-  send("progress", {
-    stage: "verifying",
-    message: `Adversarially verifying ${draft.findings?.length || 0} findings...`,
-    percent: 75,
-    detail: `Challenging every claim against known facts. Assigning certainty scores (25-99%), adding contrary evidence, removing unverifiable findings (<25%). Using ${config.verifierModel || ANTHROPIC_MODEL}.`,
-    substeps: [
-      { text: "Cross-checking financial numbers", status: "active" },
-      { text: "Validating dates and fiscal calendars", status: "active" },
-      { text: "Scoring source authority", status: "active" },
-      { text: "Finding contradictions and caveats", status: "active" },
-      { text: "Removing weak findings (<25% certainty)", status: "active" },
-    ],
-  });
-
   let report: Report;
   let verifierTrace: TraceData;
-  try {
-    const verifierResult = await verify(query, domainProfile, draft, send, config, conversationContext);
-    report = verifierResult.result;
-    verifierTrace = verifierResult.trace;
-  } catch (err) {
-    throw tagError(err as PipelineError, "verifier");
+  let removedCount: number;
+
+  if (config.skipVerifier) {
+    // Skip the verifier LLM call — assign default certainty scores programmatically.
+    // This keeps ALL findings (no LLM can remove them) and saves an entire round-trip.
+    const DEFAULT_CERTAINTY = 75;
+
+    report = {
+      ...draft,
+      findings: (draft.findings || []).map((f) => ({
+        ...f,
+        certainty: f.certainty || DEFAULT_CERTAINTY,
+        explanation: {
+          ...f.explanation,
+          contraryEvidence: f.explanation?.contraryEvidence || [],
+        },
+      })),
+    };
+
+    if (!report.meta) report.meta = {} as Report["meta"];
+    const findingsLen = report.findings.length;
+    report.meta.overallCertainty = findingsLen > 0
+      ? Math.round(report.findings.reduce((s, f) => s + (f.certainty || DEFAULT_CERTAINTY), 0) / findingsLen)
+      : 0;
+    report.meta.methodology = {
+      explanation: {
+        title: "Report Generation Methodology",
+        text: "This report was generated using AI analysis without adversarial verification (x-light mode).",
+        supportingEvidence: [{ source: "AI Pipeline", quote: "Generated via classifier, researcher, and synthesizer agents", url: "internal" }],
+        contraryEvidence: [{ source: "AI Limitations", quote: "AI-generated content may contain inaccuracies. Not financial advice.", url: "general" }],
+      },
+    };
+
+    removedCount = 0;
+    verifierTrace = {
+      timing: { durationMs: 0 },
+      parsedOutput: { skipped: true, reason: "skipVerifier enabled" },
+    };
+
+    send("progress", {
+      stage: "verified",
+      message: `Assigned default certainty to ${findingsLen} findings (verifier skipped)`,
+      percent: 95,
+      detail: `Verifier skipped for speed — all ${findingsLen} findings kept with default ${DEFAULT_CERTAINTY}% certainty`,
+      stats: {
+        findingsCount: findingsLen,
+        avgCertainty: report.meta.overallCertainty,
+        removedCount: 0,
+      },
+    });
+
+    send("trace", {
+      stage: "verifier",
+      agent: "Verifier",
+      trace: verifierTrace,
+      intermediateOutput: null,
+    });
+  } else {
+    send("progress", {
+      stage: "verifying",
+      message: `Adversarially verifying ${draft.findings?.length || 0} findings...`,
+      percent: 75,
+      detail: `Challenging every claim against known facts. Assigning certainty scores (25-99%), adding contrary evidence, removing unverifiable findings (<25%). Using ${config.verifierModel || ANTHROPIC_MODEL}.`,
+      substeps: [
+        { text: "Cross-checking financial numbers", status: "active" },
+        { text: "Validating dates and fiscal calendars", status: "active" },
+        { text: "Scoring source authority", status: "active" },
+        { text: "Finding contradictions and caveats", status: "active" },
+        { text: "Removing weak findings (<25% certainty)", status: "active" },
+      ],
+    });
+
+    try {
+      const verifierResult = await verify(query, domainProfile, draft, send, config, conversationContext);
+      report = verifierResult.result;
+      verifierTrace = verifierResult.trace;
+    } catch (err) {
+      throw tagError(err as PipelineError, "verifier");
+    }
+    if (isAborted()) return;
+
+    const findingsCount: number = report.findings?.length || 0;
+    const avgCertainty: number =
+      findingsCount > 0
+        ? Math.round(
+            report.findings.reduce((s: number, f) => s + (f.certainty || 0), 0) /
+              findingsCount
+          )
+        : 0;
+
+    removedCount = (draft.findings?.length || 0) - findingsCount;
+    const certaintyBuckets: CertaintyBuckets = { high: 0, moderate: 0, mixed: 0, weak: 0 };
+    (report.findings || []).forEach((f) => {
+      const c = f.certainty ?? 0;
+      if (c >= 90) certaintyBuckets.high++;
+      else if (c >= 70) certaintyBuckets.moderate++;
+      else if (c >= 50) certaintyBuckets.mixed++;
+      else certaintyBuckets.weak++;
+    });
+
+    send("progress", {
+      stage: "verified",
+      message: `Verified ${findingsCount} findings — avg certainty ${avgCertainty}%`,
+      percent: 95,
+      detail: `High (90%+): ${certaintyBuckets.high} | Moderate (70-89%): ${certaintyBuckets.moderate} | Mixed (50-69%): ${certaintyBuckets.mixed} | Weak (<50%): ${certaintyBuckets.weak}${removedCount > 0 ? ` | Removed: ${removedCount}` : ""}`,
+      stats: {
+        model: verifierTrace.request?.model || ANTHROPIC_MODEL,
+        durationMs: verifierTrace.timing?.durationMs,
+        inputTokens: verifierTrace.response?.usage?.input_tokens,
+        outputTokens: verifierTrace.response?.usage?.output_tokens,
+        findingsCount,
+        avgCertainty,
+        removedCount,
+        certaintyBuckets,
+      },
+    });
+
+    send("trace", {
+      stage: "verifier",
+      agent: "Verifier",
+      trace: verifierTrace,
+      intermediateOutput: null, // final report sent separately
+    });
   }
-  if (isAborted()) return;
 
   // Ensure outputFormat is set on the final report
   if (!report.meta) report.meta = {} as Report["meta"];
@@ -369,40 +530,6 @@ export async function runPipeline(
         )
       : 0;
 
-  const removedCount: number = (draft.findings?.length || 0) - findingsCount;
-  const certaintyBuckets: CertaintyBuckets = { high: 0, moderate: 0, mixed: 0, weak: 0 };
-  (report.findings || []).forEach((f) => {
-    const c = f.certainty ?? 0;
-    if (c >= 90) certaintyBuckets.high++;
-    else if (c >= 70) certaintyBuckets.moderate++;
-    else if (c >= 50) certaintyBuckets.mixed++;
-    else certaintyBuckets.weak++;
-  });
-
-  send("progress", {
-    stage: "verified",
-    message: `Verified ${findingsCount} findings — avg certainty ${avgCertainty}%`,
-    percent: 95,
-    detail: `High (90%+): ${certaintyBuckets.high} | Moderate (70-89%): ${certaintyBuckets.moderate} | Mixed (50-69%): ${certaintyBuckets.mixed} | Weak (<50%): ${certaintyBuckets.weak}${removedCount > 0 ? ` | Removed: ${removedCount}` : ""}`,
-    stats: {
-      model: verifierTrace.request?.model || ANTHROPIC_MODEL,
-      durationMs: verifierTrace.timing?.durationMs,
-      inputTokens: verifierTrace.response?.usage?.input_tokens,
-      outputTokens: verifierTrace.response?.usage?.output_tokens,
-      findingsCount,
-      avgCertainty,
-      removedCount,
-      certaintyBuckets,
-    },
-  });
-
-  send("trace", {
-    stage: "verifier",
-    agent: "Verifier",
-    trace: verifierTrace,
-    intermediateOutput: null, // final report sent separately
-  });
-
   // ── Stage 5: Deliver ────────────────────────────────────────────────────────
   const pipelineDurationMs: number = Date.now() - pipelineStartTime;
 
@@ -414,7 +541,7 @@ export async function runPipeline(
     },
     intermediateOutput: {
       query,
-      totalStages: 5,
+      totalStages: config.skipVerifier ? 4 : 5,
       totalFindings: findingsCount,
       avgCertainty,
     },
