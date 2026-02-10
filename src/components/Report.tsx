@@ -336,80 +336,89 @@ export default function Report({ data, traceData, onBack, slug, saveState, onRet
                 View as Slides
               </button>
             )}
-            <ExportMenu defaultFormat="pdf" theme="light" />
-            {/* Save status + copy link */}
-            <span
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                marginLeft: "auto",
-                fontSize: 12,
-                fontWeight: 500,
-              }}
-            >
-              {saveState === "saving" && (
-                <span style={{ color: COLORS.textMuted }}>Autosaving...</span>
-              )}
-              {saveState === "saved" && slug && (
-                <>
-                  <span style={{ color: COLORS.green }}>Saved</span>
-                  <button
-                    onClick={() => {
-                      const fullUrl = window.location.origin + `/reports/${slug}`;
-                      navigator.clipboard.writeText(fullUrl).then(
-                        () => {
-                          setCopyState("copied");
-                          setTimeout(() => setCopyState("idle"), 2000);
-                        },
-                        () => {
-                          setCopyState("failed");
-                          setTimeout(() => setCopyState("idle"), 2000);
-                        }
-                      );
-                    }}
-                    aria-label="Copy report link"
-                    style={{
-                      border: `1px solid ${copyState === "failed" ? COLORS.red + "40" : COLORS.green + "40"}`,
-                      background: copyState === "copied" ? COLORS.green + "0a" : "#fff",
-                      borderRadius: 3,
-                      padding: "1px 8px",
-                      fontSize: 11,
-                      fontWeight: 600,
-                      color: copyState === "failed" ? COLORS.red : COLORS.green,
-                      cursor: copyState !== "idle" ? "default" : "pointer",
-                      transition: "all 0.15s",
-                    }}
-                    disabled={copyState !== "idle"}
-                  >
-                    {copyState === "copied" ? "Link Copied \u2713" : copyState === "failed" ? "Copy Failed" : "Copy Link"}
-                  </button>
-                </>
-              )}
-              {saveState === "error" && (
-                <>
-                  <span style={{ color: COLORS.red }}>Save failed</span>
-                  {onRetrySave && (
+            <ExportMenu
+              defaultFormat="pdf"
+              theme="light"
+              isMobile={isMobile}
+              saveState={saveState}
+              slug={slug ?? undefined}
+              onRetrySave={onRetrySave}
+            />
+            {/* Save status + copy link (hidden on mobile — shown inside ExportMenu) */}
+            {!isMobile && (
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  marginLeft: "auto",
+                  fontSize: 12,
+                  fontWeight: 500,
+                }}
+              >
+                {saveState === "saving" && (
+                  <span style={{ color: COLORS.textMuted }}>Autosaving...</span>
+                )}
+                {saveState === "saved" && slug && (
+                  <>
+                    <span style={{ color: COLORS.green }}>Saved</span>
                     <button
-                      onClick={onRetrySave}
-                      aria-label="Retry saving report"
+                      onClick={() => {
+                        const fullUrl = window.location.origin + `/reports/${slug}`;
+                        navigator.clipboard.writeText(fullUrl).then(
+                          () => {
+                            setCopyState("copied");
+                            setTimeout(() => setCopyState("idle"), 2000);
+                          },
+                          () => {
+                            setCopyState("failed");
+                            setTimeout(() => setCopyState("idle"), 2000);
+                          }
+                        );
+                      }}
+                      aria-label="Copy report link"
                       style={{
-                        border: `1px solid ${COLORS.red}40`,
-                        background: "#fff",
+                        border: `1px solid ${copyState === "failed" ? COLORS.red + "40" : COLORS.green + "40"}`,
+                        background: copyState === "copied" ? COLORS.green + "0a" : "#fff",
                         borderRadius: 3,
                         padding: "1px 8px",
                         fontSize: 11,
                         fontWeight: 600,
-                        color: COLORS.red,
-                        cursor: "pointer",
+                        color: copyState === "failed" ? COLORS.red : COLORS.green,
+                        cursor: copyState !== "idle" ? "default" : "pointer",
+                        transition: "all 0.15s",
                       }}
+                      disabled={copyState !== "idle"}
                     >
-                      Try Again
+                      {copyState === "copied" ? "Link Copied \u2713" : copyState === "failed" ? "Copy Failed" : "Copy Link"}
                     </button>
-                  )}
-                </>
-              )}
-            </span>
+                  </>
+                )}
+                {saveState === "error" && (
+                  <>
+                    <span style={{ color: COLORS.red }}>Save failed</span>
+                    {onRetrySave && (
+                      <button
+                        onClick={onRetrySave}
+                        aria-label="Retry saving report"
+                        style={{
+                          border: `1px solid ${COLORS.red}40`,
+                          background: "#fff",
+                          borderRadius: 3,
+                          padding: "1px 8px",
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: COLORS.red,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Try Again
+                      </button>
+                    )}
+                  </>
+                )}
+              </span>
+            )}
           </div>
 
           {/* Overall Certainty Banner */}
