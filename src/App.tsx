@@ -133,7 +133,6 @@ export default function App() {
 
   // ── Mobile state ──────────────────────────────────────────────────────────
   const isMobile = useIsMobile();
-  const [showMobileChat, setShowMobileChat] = useState(false);
 
   // ── View mode toggle (report vs slide deck) ────────────────────────────────
   const [viewMode, setViewMode] = useState<"report" | "slides" | null>(null);
@@ -733,38 +732,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Mobile: Chat drawer overlay */}
-      {isMobile && showMobileChat && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 300,
-            display: "flex",
-          }}
-        >
-          {/* Chat drawer panel */}
-          <div style={{
-            width: "85%",
-            maxWidth: 380,
-            height: "100%",
-            background: "#f7f7fa",
-            boxShadow: "4px 0 24px rgba(0,0,0,0.15)",
-            overflow: "hidden",
-          }}>
-            {chatPanelNode}
-          </div>
-          {/* Backdrop to close */}
-          <div
-            onClick={() => setShowMobileChat(false)}
-            style={{
-              flex: 1,
-              background: "rgba(0,0,0,0.3)",
-            }}
-          />
-        </div>
-      )}
-
       {/* Center + Right: Report area */}
       <div style={{
         flex: 1,
@@ -781,7 +748,6 @@ export default function App() {
               saveState={saveState}
               onRetrySave={handleRetrySave}
               onToggleView={handleToggleView}
-              onOpenChat={isMobile ? () => setShowMobileChat(true) : undefined}
               isGenerating={isGenerating}
             />
           ) : (
@@ -793,7 +759,6 @@ export default function App() {
               saveState={saveState}
               onRetrySave={handleRetrySave}
               onToggleView={handleToggleView}
-              onOpenChat={isMobile ? () => setShowMobileChat(true) : undefined}
               isGenerating={isGenerating}
             />
           )
@@ -821,27 +786,9 @@ export default function App() {
                 background: "#fff",
                 flexShrink: 0,
               }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <button
-                    onClick={() => setShowMobileChat(true)}
-                    aria-label="Open chat"
-                    style={{
-                      border: `1px solid ${COLORS.border}`,
-                      background: "#fff",
-                      borderRadius: 6,
-                      padding: "6px 8px",
-                      cursor: "pointer",
-                      fontSize: 16,
-                      lineHeight: 1,
-                      color: COLORS.text,
-                    }}
-                  >
-                    &#9776;
-                  </button>
-                  <span style={{ fontSize: 15, fontWeight: 800, letterSpacing: -0.5, color: COLORS.text }}>
-                    Doubly<span style={{ color: COLORS.orange }}>AI</span>
-                  </span>
-                </div>
+                <span style={{ fontSize: 15, fontWeight: 800, letterSpacing: -0.5, color: COLORS.text }}>
+                  Doubly<span style={{ color: COLORS.orange }}>AI</span>
+                </span>
                 <button
                   onClick={handleNewConversation}
                   style={{
