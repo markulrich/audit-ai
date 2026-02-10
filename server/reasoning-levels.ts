@@ -22,6 +22,8 @@ export const REASONING_LEVELS: Record<string, ReasoningConfig> = {
 
     // Researcher
     evidenceMinItems: 2,
+    webSearchQueries: 2,
+    webSearchResultsPerQuery: 3,
 
     // Synthesizer
     totalFindings: "3-5",
@@ -51,6 +53,8 @@ export const REASONING_LEVELS: Record<string, ReasoningConfig> = {
     verifierModel: undefined,
 
     evidenceMinItems: 20,
+    webSearchQueries: 5,
+    webSearchResultsPerQuery: 5,
 
     totalFindings: "12-18",
     findingsPerSection: "2-3",
@@ -73,6 +77,8 @@ export const REASONING_LEVELS: Record<string, ReasoningConfig> = {
     verifierModel: "claude-sonnet-4-5",
 
     evidenceMinItems: 40,
+    webSearchQueries: 8,
+    webSearchResultsPerQuery: 5,
 
     totalFindings: "25-35",
     findingsPerSection: "3-5",
@@ -95,6 +101,8 @@ export const REASONING_LEVELS: Record<string, ReasoningConfig> = {
     verifierModel: "claude-opus-4-6",
 
     evidenceMinItems: 60,
+    webSearchQueries: 12,
+    webSearchResultsPerQuery: 8,
 
     totalFindings: "35-50",
     findingsPerSection: "4-7",
