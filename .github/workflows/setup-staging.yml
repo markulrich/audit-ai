@@ -1,0 +1,37 @@
+name: Setup Staging Branch
+
+# One-time workflow: creates the staging branch and sets it as default.
+# Runs once when this file lands on main, then can be deleted.
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/setup-staging.yml'
+
+permissions:
+  contents: write
+  administration: write
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Create staging branch (if needed)
+        run: |
+          if git ls-remote --heads origin staging | grep -q staging; then
+            echo "staging branch already exists"
+          else
+            git push origin HEAD:refs/heads/staging
+            echo "staging branch created from main"
+          fi
+
+      - name: Set staging as default branch
+        run: |
+          gh repo edit --default-branch staging
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

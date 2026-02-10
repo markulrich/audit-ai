@@ -384,6 +384,17 @@ fly storage create   # Sets up Tigris S3 + all AWS_* secrets automatically
 fly deploy
 ```
 
+### Branching Model
+
+The repository uses `staging` as the **default branch** for pull requests. All PRs should target `staging` unless explicitly targeting `main`.
+
+- **`staging`** — Integration branch. All feature PRs merge here first.
+- **`main`** — Production branch. Only updated by merging `staging` into `main` when ready to deploy.
+
+```
+feature branch → PR → staging → (merge to main) → production deploy
+```
+
 ### CI/CD (GitHub Actions)
 
 - **`tests.yml`** — Runs `npm run test:ci` on all pushes and PRs. Installs Playwright for browser tests.
