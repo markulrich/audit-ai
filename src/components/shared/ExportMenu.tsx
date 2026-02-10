@@ -2,6 +2,8 @@ import { useState, useRef, useEffect, useCallback } from "react";
 
 export type ExportFormat = "pdf" | "pptx";
 
+type SaveState = "idle" | "saving" | "saved" | "error";
+
 interface ExportMenuProps {
   /** Which format is shown as the primary/default option */
   defaultFormat: ExportFormat;
@@ -9,6 +11,11 @@ interface ExportMenuProps {
   onExport?: (format: ExportFormat) => void;
   /** Color scheme: "light" for Report, "dark" for SlideDeck */
   theme?: "light" | "dark";
+  /** On mobile, save state UI is folded into the Export dropdown */
+  isMobile?: boolean;
+  saveState?: SaveState;
+  slug?: string;
+  onRetrySave?: () => void;
 }
 
 const FORMATS: Record<ExportFormat, { label: string; icon: string }> = {
@@ -16,9 +23,10 @@ const FORMATS: Record<ExportFormat, { label: string; icon: string }> = {
   pptx: { label: "Export PowerPoint", icon: "PPTX" },
 };
 
-export default function ExportMenu({ defaultFormat, onExport, theme = "light" }: ExportMenuProps) {
+export default function ExportMenu({ defaultFormat, onExport, theme = "light", isMobile, saveState, slug, onRetrySave }: ExportMenuProps) {
   const [open, setOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const containerRef = useRef<HTMLDivElement>(null);
   const hoverTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -28,6 +36,9 @@ export default function ExportMenu({ defaultFormat, onExport, theme = "light" }:
   const textColor = isDark ? "#e8e8f0" : "#555770";
   const textDim = isDark ? "#9a9ab0" : "#8a8ca5";
   const hoverBg = isDark ? "#2a2a40" : "#f7f7fa";
+  const greenColor = isDark ? "#34d399" : "#16a34a";
+  const redColor = isDark ? "#f87171" : "#dc2626";
+  const showSaveInMenu = isMobile && saveState && saveState !== "idle";
 
   const otherFormat: ExportFormat = defaultFormat === "pdf" ? "pptx" : "pdf";
 
@@ -102,6 +113,15 @@ export default function ExportMenu({ defaultFormat, onExport, theme = "light" }:
         }}
       >
         Export
+        {showSaveInMenu && (
+          <span style={{
+            width: 6,
+            height: 6,
+            borderRadius: "50%",
+            background: saveState === "error" ? redColor : saveState === "saved" ? greenColor : textDim,
+            flexShrink: 0,
+          }} />
+        )}
         <span style={{ fontSize: 10, marginLeft: 2, opacity: 0.6 }}>{open ? "\u25B2" : "\u25BC"}</span>
       </button>
 
@@ -170,6 +190,91 @@ export default function ExportMenu({ defaultFormat, onExport, theme = "light" }:
               )}
             </button>
           ))}
+
+          {/* Save state section (mobile only) */}
+          {showSaveInMenu && (
+            <>
+              <div style={{
+                height: 1,
+                background: borderColor,
+                margin: "4px 0",
+              }} />
+              <div style={{
+                padding: "8px 14px",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                fontSize: 12,
+                fontWeight: 500,
+              }}>
+                {saveState === "saving" && (
+                  <span style={{ color: textDim }}>Autosaving...</span>
+                )}
+                {saveState === "saved" && (
+                  <>
+                    <span style={{ color: greenColor }}>Saved</span>
+                    {slug && (
+                      <button
+                        onClick={() => {
+                          const fullUrl = window.location.origin + `/reports/${slug}`;
+                          navigator.clipboard.writeText(fullUrl).then(
+                            () => {
+                              setCopyState("copied");
+                              setTimeout(() => setCopyState("idle"), 2000);
+                            },
+                            () => {
+                              setCopyState("failed");
+                              setTimeout(() => setCopyState("idle"), 2000);
+                            }
+                          );
+                        }}
+                        aria-label="Copy report link"
+                        style={{
+                          border: `1px solid ${copyState === "failed" ? redColor + "40" : greenColor + "40"}`,
+                          background: copyState === "copied" ? greenColor + "0a" : "transparent",
+                          borderRadius: 3,
+                          padding: "1px 8px",
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: copyState === "failed" ? redColor : greenColor,
+                          cursor: copyState !== "idle" ? "default" : "pointer",
+                          transition: "all 0.15s",
+                          marginLeft: "auto",
+                        }}
+                        disabled={copyState !== "idle"}
+                      >
+                        {copyState === "copied" ? "Link Copied \u2713" : copyState === "failed" ? "Copy Failed" : "Copy Link"}
+                      </button>
+                    )}
+                  </>
+                )}
+                {saveState === "error" && (
+                  <>
+                    <span style={{ color: redColor }}>Save failed</span>
+                    {onRetrySave && (
+                      <button
+                        onClick={onRetrySave}
+                        aria-label="Retry saving report"
+                        style={{
+                          border: `1px solid ${redColor}40`,
+                          background: "transparent",
+                          borderRadius: 3,
+                          padding: "1px 8px",
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: redColor,
+                          cursor: "pointer",
+                          marginLeft: "auto",
+                        }}
+                      >
+                        Try Again
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            </>
+          )}
         </div>
       )}
 
