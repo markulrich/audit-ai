@@ -12,7 +12,7 @@ vi.mock("../anthropic-client", (): { tracedCreate: Mock } => ({
   tracedCreate: vi.fn(),
 }));
 
-import { verify } from "./verifier";
+import { verify, computeDynamicThreshold } from "./verifier";
 import { tracedCreate } from "../anthropic-client";
 
 const mockedTracedCreate = tracedCreate as Mock;
@@ -384,6 +384,110 @@ describe("verifier agent", () => {
       const titleSlide = result.sections.find((s) => s.id === "title_slide");
       expect(titleSlide).toBeDefined();
       expect(titleSlide!.content[0].type).toBe("text");
+    });
+  });
+
+  // ── Dynamic threshold ─────────────────────────────────────────────────
+
+  describe("computeDynamicThreshold", () => {
+    it("returns 0 for empty findings", () => {
+      expect(computeDynamicThreshold([])).toBe(0);
+    });
+
+    it("returns 0 when median certainty is below 50", () => {
+      const findings = [
+        { id: "f1", certainty: 20 },
+        { id: "f2", certainty: 30 },
+        { id: "f3", certainty: 40 },
+      ] as Finding[];
+      expect(computeDynamicThreshold(findings)).toBe(0);
+    });
+
+    it("returns 20 when median certainty is 50-69", () => {
+      const findings = [
+        { id: "f1", certainty: 40 },
+        { id: "f2", certainty: 60 },
+        { id: "f3", certainty: 65 },
+      ] as Finding[];
+      expect(computeDynamicThreshold(findings)).toBe(20);
+    });
+
+    it("returns 30 when median certainty is 70-84", () => {
+      const findings = [
+        { id: "f1", certainty: 50 },
+        { id: "f2", certainty: 75 },
+        { id: "f3", certainty: 80 },
+      ] as Finding[];
+      expect(computeDynamicThreshold(findings)).toBe(30);
+    });
+
+    it("returns 40 when median certainty is 85+", () => {
+      const findings = [
+        { id: "f1", certainty: 80 },
+        { id: "f2", certainty: 90 },
+        { id: "f3", certainty: 95 },
+      ] as Finding[];
+      expect(computeDynamicThreshold(findings)).toBe(40);
+    });
+  });
+
+  describe("dynamic threshold filtering in verify()", () => {
+    it("filters low-certainty findings when median is high", async () => {
+      const report = makeDraft();
+      report.findings[0] = { ...report.findings[0], certainty: 90 };
+      report.findings[1] = { ...report.findings[1], certainty: 15 };
+      // Add a third high-certainty finding so median >= 85
+      report.findings.push({
+        id: "f3",
+        section: "investment_thesis",
+        text: "Third finding",
+        certainty: 92,
+        explanation: { title: "T", text: "T", supportingEvidence: [], contraryEvidence: [] },
+      });
+      report.sections[0].content.push({ type: "finding", id: "f3" });
+      // median of [15, 90, 92] = 90 → threshold 40 → f2 (15%) removed
+      mockAiResponse(JSON.stringify(report));
+
+      const { result } = await verify("test query", domainProfile, makeDraft() as unknown as Report, undefined);
+      const ids = result.findings.map((f) => f.id);
+      expect(ids).toContain("f1");
+      expect(ids).not.toContain("f2");
+      expect(ids).toContain("f3");
+    });
+
+    it("keeps all findings when median certainty is low", async () => {
+      const report = makeDraft();
+      report.findings[0] = { ...report.findings[0], certainty: 30 };
+      report.findings[1] = { ...report.findings[1], certainty: 25 };
+      // median of [25, 30] = 25 → threshold 0 → keep all
+      mockAiResponse(JSON.stringify(report));
+
+      const { result } = await verify("test query", domainProfile, makeDraft() as unknown as Report, undefined);
+      expect(result.findings).toHaveLength(2);
+      expect(result.meta.overallCertainty).toBe(28); // mean of [25, 30]
+    });
+
+    it("never produces an empty report even if all findings are below threshold", async () => {
+      const report = makeDraft();
+      // All findings scored high except one scored 0 — but only 2 findings
+      // with median 45 → threshold 0, keeps all
+      report.findings[0] = { ...report.findings[0], certainty: 45 };
+      report.findings[1] = { ...report.findings[1], certainty: 10 };
+      mockAiResponse(JSON.stringify(report));
+
+      const { result } = await verify("test query", domainProfile, makeDraft() as unknown as Report, undefined);
+      expect(result.findings.length).toBeGreaterThan(0);
+    });
+
+    it("falls back to draft findings when verifier returns 0 findings", async () => {
+      const report = makeDraft();
+      report.findings = [];
+      mockAiResponse(JSON.stringify(report));
+
+      const draft = makeDraft() as unknown as Report;
+      const { result } = await verify("test query", domainProfile, draft, undefined);
+      expect(result.findings.length).toBeGreaterThan(0);
+      expect(result.findings[0].certainty).toBe(15);
     });
   });
 });

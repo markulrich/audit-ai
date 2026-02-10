@@ -14,8 +14,32 @@ import type {
 } from "../../shared/types";
 
 /**
+ * Computes a dynamic removal threshold based on the quality distribution
+ * of verified findings. When evidence quality is high, we can be more
+ * selective. When quality is low, we keep everything and let the certainty
+ * scores tell the story.
+ *
+ * The key insight: the more high-certainty findings you have, the higher
+ * the bar should be for what gets included. This prevents low-quality
+ * findings from diluting an otherwise strong report.
+ */
+export function computeDynamicThreshold(findings: Finding[]): number {
+  if (findings.length === 0) return 0;
+
+  const scores = findings.map((f) => f.certainty || 0).sort((a, b) => a - b);
+  const median = scores[Math.floor(scores.length / 2)];
+
+  // High-quality report: be more selective
+  if (median >= 85) return 40;
+  if (median >= 70) return 30;
+  if (median >= 50) return 20;
+  // Low-quality evidence overall: keep everything, show uncertainty
+  return 0;
+}
+
+/**
  * Removes finding references from section content arrays when the finding
- * has been deleted (e.g., certainty < 25%). Also collapses adjacent text nodes
+ * has been deleted. Also collapses adjacent text nodes
  * and removes sections that have no findings left.
  *
  * Preserves title_slide sections even if they have no findings (they typically
@@ -69,7 +93,6 @@ export async function verify(
   const { ticker, companyName } = domainProfile;
   const methodologyLength = config.methodologyLength || "3-5 sentences";
   const methodologySources = config.methodologySources || "3-4";
-  const removalThreshold = config.removalThreshold ?? 25;
 
   const isSlides = domainProfile.outputFormat === "slide_deck";
   const formatLabel = isSlides ? "slide deck" : "equity research report";
@@ -117,7 +140,7 @@ For each finding:
    - 70-84%: Moderate, credible with caveats or forward-looking
    - 50-69%: Mixed, significant uncertainty
    - 25-49%: Weak or speculative
-   - <${removalThreshold}%: Remove entirely${removalThreshold === 0 ? " (removal disabled)" : ""}
+   - 1-24%: Very weak, mostly unverifiable — but still include in output
 
 Output schema (frontend depends on exact placement):
 - "certainty" at finding ROOT level (not inside explanation)
@@ -126,7 +149,7 @@ Output schema (frontend depends on exact placement):
 
 Also:
 - Add "overallCertainty" to meta (arithmetic mean of remaining finding scores)
-- ${removalThreshold > 0 ? `Remove findings with certainty < ${removalThreshold}% from findings array and section content` : "Keep all findings regardless of score"}
+- Keep ALL findings in the output — do not remove any, even very low scoring ones. The system will filter based on overall evidence quality.
 - You may improve explanation text to add context or corrections
 - Don't change meta or section structure (except removing deleted finding refs)
 
@@ -171,9 +194,36 @@ Return complete report JSON. No markdown fences.`,
     const cleaned = text.replace(/```json\n?|\n?```/g, "").trim();
     const report: Report = JSON.parse(cleaned);
 
-    // Ensure meta and overallCertainty exist
+    // Ensure meta exists
     if (!report.meta) report.meta = {} as Report["meta"];
-    if (!report.meta.overallCertainty && report.findings?.length > 0) {
+
+    // If verifier returned 0 findings, fall back to draft findings with low certainty
+    if (!report.findings?.length && draft.findings?.length) {
+      report.findings = draft.findings.map((f) => ({
+        ...f,
+        certainty: f.certainty || 15,
+        explanation: {
+          ...f.explanation,
+          contraryEvidence: f.explanation?.contraryEvidence || [
+            { source: "Verification", quote: "Could not verify — verifier returned no findings", url: "internal" },
+          ],
+        },
+      }));
+      report.sections = draft.sections || report.sections;
+    }
+
+    // Apply dynamic threshold based on evidence quality distribution
+    const dynamicThreshold = computeDynamicThreshold(report.findings || []);
+    if (dynamicThreshold > 0 && report.findings?.length > 0) {
+      const filtered = report.findings.filter((f) => (f.certainty || 0) >= dynamicThreshold);
+      // Never produce an empty report — if threshold would remove everything, keep all
+      if (filtered.length > 0) {
+        report.findings = filtered;
+      }
+    }
+
+    // Compute overallCertainty from remaining findings
+    if (report.findings?.length > 0) {
       report.meta.overallCertainty = Math.round(
         report.findings.reduce((s: number, f: Finding) => s + (f.certainty || 50), 0) /
           report.findings.length
@@ -199,6 +249,7 @@ Return complete report JSON. No markdown fences.`,
         parsedOutput: {
           findingsCount: report.findings?.length || 0,
           overallCertainty: report.meta?.overallCertainty,
+          dynamicThreshold,
           removedFindings,
           certaintySummary,
         },
@@ -246,7 +297,17 @@ Return complete report JSON. No markdown fences.`,
       try {
         const report: Report = extracted;
         if (!report.meta) report.meta = {} as Report["meta"];
-        if (!report.meta.overallCertainty && report.findings?.length > 0) {
+
+        // Apply dynamic threshold based on evidence quality
+        const dynamicThreshold = computeDynamicThreshold(report.findings || []);
+        if (dynamicThreshold > 0 && report.findings?.length > 0) {
+          const filtered = report.findings.filter((f) => (f.certainty || 0) >= dynamicThreshold);
+          if (filtered.length > 0) {
+            report.findings = filtered;
+          }
+        }
+
+        if (report.findings?.length > 0) {
           report.meta.overallCertainty = Math.round(
             report.findings.reduce((s: number, f: Finding) => s + (f.certainty || 50), 0) /
               report.findings.length
@@ -255,7 +316,7 @@ Return complete report JSON. No markdown fences.`,
         cleanOrphanedRefs(report);
         return {
           result: report,
-          trace: { ...trace, parseWarning: "Extracted via regex fallback" },
+          trace: { ...trace, parseWarning: "Extracted via regex fallback", parsedOutput: { dynamicThreshold } },
         };
       } catch (parseErr) {
         console.error("Verification agent regex fallback parse error:", (parseErr as PipelineError).message);

@@ -141,7 +141,7 @@ export interface ReasoningConfig {
   keyStatsCount: number;
   methodologyLength: string;
   methodologySources: string;
-  removalThreshold: number;
+  removalThreshold?: number; // deprecated — threshold is now computed dynamically from evidence quality
   skipVerifier?: boolean;
   parallelDraftAndResearch?: boolean;
 }

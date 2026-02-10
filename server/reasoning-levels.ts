@@ -34,7 +34,7 @@ export const REASONING_LEVELS: Record<string, ReasoningConfig> = {
     // Verifier
     methodologyLength: "1 sentence",
     methodologySources: "1",
-    removalThreshold: 0, // keep all findings regardless of certainty
+    // removalThreshold removed — now computed dynamically from evidence quality
 
     // Speed optimizations
     skipVerifier: true, // assign default certainty scores instead of LLM call
@@ -61,7 +61,6 @@ export const REASONING_LEVELS: Record<string, ReasoningConfig> = {
 
     methodologyLength: "2-3 sentences",
     methodologySources: "2-3",
-    removalThreshold: 25,
   },
 
   heavy: {
@@ -84,7 +83,6 @@ export const REASONING_LEVELS: Record<string, ReasoningConfig> = {
 
     methodologyLength: "3-5 sentences",
     methodologySources: "3-4",
-    removalThreshold: 25,
   },
 
   "x-heavy": {
@@ -107,7 +105,6 @@ export const REASONING_LEVELS: Record<string, ReasoningConfig> = {
 
     methodologyLength: "5-8 sentences",
     methodologySources: "4-6",
-    removalThreshold: 25,
   },
 };
 
