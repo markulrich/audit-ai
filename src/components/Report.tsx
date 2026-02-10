@@ -13,6 +13,7 @@ import { useIsMobile } from "./shared/useIsMobile";
 import CertaintyBadge from "./shared/CertaintyBadge";
 import ExplanationPanel from "./shared/ExplanationPanel";
 import ExportMenu from "./shared/ExportMenu";
+import MobileBottomSheet from "./shared/MobileBottomSheet";
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
 
@@ -740,80 +741,11 @@ export default function Report({ data, traceData, onBack, slug, saveState, onRet
               ?
             </button>
           )}
-          {/* Mobile panel overlay — bottom sheet */}
+          {/* Mobile panel overlay — animated bottom sheet */}
           {showPanel && (
-            <div
-              style={{
-                position: "fixed",
-                inset: 0,
-                zIndex: 200,
-                display: "flex",
-                flexDirection: "column",
-              }}
-            >
-              {/* Tappable backdrop */}
-              <div
-                onClick={() => setShowPanel(false)}
-                style={{
-                  flex: "0 0 10vh",
-                  background: "rgba(0,0,0,0.35)",
-                }}
-              />
-              {/* Bottom sheet */}
-              <div
-                style={{
-                  flex: 1,
-                  background: COLORS.cardBg,
-                  borderTopLeftRadius: 16,
-                  borderTopRightRadius: 16,
-                  overflow: "hidden",
-                  display: "flex",
-                  flexDirection: "column",
-                  boxShadow: "0 -4px 20px rgba(0,0,0,0.12)",
-                }}
-              >
-                {/* Handle bar + close */}
-                <div
-                  onClick={() => setShowPanel(false)}
-                  style={{
-                    padding: "10px 12px 6px",
-                    display: "flex",
-                    justifyContent: "center",
-                    alignItems: "center",
-                    position: "relative",
-                    cursor: "pointer",
-                  }}
-                >
-                  <div
-                    style={{
-                      width: 40,
-                      height: 4,
-                      borderRadius: 2,
-                      background: COLORS.border,
-                    }}
-                  />
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setShowPanel(false); }}
-                    aria-label="Close explanation panel"
-                    style={{
-                      position: "absolute",
-                      right: 12,
-                      top: 6,
-                      border: "none",
-                      background: "transparent",
-                      fontSize: 18,
-                      color: COLORS.textMuted,
-                      cursor: "pointer",
-                      padding: "4px 8px",
-                      borderRadius: 4,
-                    }}
-                  >
-                    ✕
-                  </button>
-                </div>
-                {panelContent}
-              </div>
-            </div>
+            <MobileBottomSheet onClose={() => setShowPanel(false)}>
+              {panelContent}
+            </MobileBottomSheet>
           )}
         </>
       ) : (

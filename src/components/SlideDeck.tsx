@@ -12,6 +12,7 @@ import { useIsMobile } from "./shared/useIsMobile";
 import CertaintyBadge from "./shared/CertaintyBadge";
 import ExplanationPanel from "./shared/ExplanationPanel";
 import ExportMenu from "./shared/ExportMenu";
+import MobileBottomSheet from "./shared/MobileBottomSheet";
 
 // ─── Dark Theme Colors ──────────────────────────────────────────────────────────
 
@@ -664,34 +665,14 @@ export default function SlideDeck({ data, traceData, onBack, slug, saveState, on
             </button>
           )}
           {showPanel && activeId && (
-            <div style={{ position: "fixed", inset: 0, zIndex: 200, display: "flex", flexDirection: "column" }}>
-              <div onClick={() => setShowPanel(false)} style={{ flex: "0 0 10vh", background: "rgba(0,0,0,0.4)" }} />
-              <div style={{
-                flex: 1,
-                background: "#fff",
-                borderTopLeftRadius: 16,
-                borderTopRightRadius: 16,
-                overflow: "hidden",
-                display: "flex",
-                flexDirection: "column",
-                boxShadow: "0 -4px 20px rgba(0,0,0,0.15)",
-              }}>
-                <div
-                  onClick={() => setShowPanel(false)}
-                  style={{ padding: "10px 12px 6px", display: "flex", justifyContent: "center", alignItems: "center", position: "relative", cursor: "pointer" }}
-                >
-                  <div style={{ width: 40, height: 4, borderRadius: 2, background: "#e2e4ea" }} />
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setShowPanel(false); }}
-                    aria-label="Close explanation panel"
-                    style={{ position: "absolute", right: 12, top: 6, border: "none", background: "transparent", fontSize: 18, color: "#8a8ca5", cursor: "pointer", padding: "4px 8px", borderRadius: 4 }}
-                  >
-                    ✕
-                  </button>
-                </div>
-                {panelContent}
-              </div>
-            </div>
+            <MobileBottomSheet
+              onClose={() => setShowPanel(false)}
+              cardBg="#fff"
+              handleColor="#e2e4ea"
+              closeButtonColor="#8a8ca5"
+            >
+              {panelContent}
+            </MobileBottomSheet>
           )}
         </>
       ) : (
