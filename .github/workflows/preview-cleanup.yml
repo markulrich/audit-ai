@@ -1,0 +1,88 @@
+name: Preview Cleanup
+
+on:
+  schedule:
+    # Run every hour
+    - cron: '0 * * * *'
+  workflow_dispatch: # Allow manual trigger
+
+env:
+  FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+jobs:
+  cleanup-stale-previews:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Setup flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@fc53c09e1bc3be6f54706524e3b82c4f462f77be # v1.5
+
+      - name: Find and destroy stale preview apps
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        with:
+          script: |
+            const { execSync } = require('child_process');
+
+            // List all Fly apps matching our preview naming convention
+            const appsList = execSync('flyctl apps list --json', { encoding: 'utf8' });
+            const apps = JSON.parse(appsList);
+            const previewApps = apps.filter(a => a.Name.startsWith('audit-ai-pr-'));
+
+            if (previewApps.length === 0) {
+              console.log('No preview apps found.');
+              return;
+            }
+
+            const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
+            const now = Date.now();
+
+            for (const app of previewApps) {
+              const match = app.Name.match(/^audit-ai-pr-(\d+)$/);
+              if (!match) {
+                console.log(`Skipping ${app.Name}: does not match expected pattern.`);
+                continue;
+              }
+
+              const prNumber = parseInt(match[1], 10);
+              console.log(`Checking PR #${prNumber} for app ${app.Name}...`);
+
+              try {
+                const { data: pr } = await github.rest.pulls.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: prNumber,
+                });
+
+                if (pr.state !== 'closed') {
+                  console.log(`PR #${prNumber} is still open, skipping.`);
+                  continue;
+                }
+
+                const closedAt = new Date(pr.closed_at).getTime();
+                const hoursSinceClosed = (now - closedAt) / (1000 * 60 * 60);
+
+                if (now - closedAt < TWELVE_HOURS_MS) {
+                  console.log(`PR #${prNumber} closed ${hoursSinceClosed.toFixed(1)}h ago, keeping preview (< 12h).`);
+                  continue;
+                }
+
+                console.log(`PR #${prNumber} closed ${hoursSinceClosed.toFixed(1)}h ago, destroying ${app.Name}...`);
+                try {
+                  execSync(`flyctl apps destroy ${app.Name} --yes`, { encoding: 'utf8', stdio: 'inherit' });
+                  console.log(`Destroyed ${app.Name}.`);
+                } catch (destroyErr) {
+                  console.error(`Failed to destroy ${app.Name}: ${destroyErr.message}`);
+                }
+              } catch (err) {
+                // PR not found (deleted repo, etc.) — destroy the app to be safe
+                console.log(`Could not fetch PR #${prNumber} (${err.message}), destroying orphaned app ${app.Name}...`);
+                try {
+                  execSync(`flyctl apps destroy ${app.Name} --yes`, { encoding: 'utf8', stdio: 'inherit' });
+                  console.log(`Destroyed orphaned ${app.Name}.`);
+                } catch (destroyErr) {
+                  console.error(`Failed to destroy ${app.Name}: ${destroyErr.message}`);
+                }
+              }
+            }
