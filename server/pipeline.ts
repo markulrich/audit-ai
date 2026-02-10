@@ -4,6 +4,7 @@ import { research } from "./agents/researcher";
 import { synthesize } from "./agents/synthesizer";
 import { verify } from "./agents/verifier";
 import { ANTHROPIC_MODEL } from "./anthropic-client";
+import { stripFindingsWithoutExplanations } from "./finding-validation";
 import { getReasoningConfig } from "./reasoning-levels";
 
 import type {
@@ -520,6 +521,10 @@ export async function runPipeline(
   // Ensure outputFormat is set on the final report
   if (!report.meta) report.meta = {} as Report["meta"];
   report.meta.outputFormat = domainProfile.outputFormat;
+
+  // Strip any findings that lack an explanation so every interactive
+  // span in the rendered report has a backing explanation panel.
+  stripFindingsWithoutExplanations(report);
 
   const findingsCount: number = report.findings?.length || 0;
   const avgCertainty: number =
