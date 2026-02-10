@@ -426,6 +426,15 @@ fly deploy
 - PDF export
 - Enterprise features (team workspaces, audit trails, SSO)
 
+## Claude Code Workflow
+
+When completing a task that involves code changes:
+
+1. **Always create a PR.** After committing and pushing changes to a feature branch, automatically create a pull request using `gh pr create`. Do not wait for the user to ask — PR creation is the expected final step of any implementation task.
+2. **PR format:** Use a concise title (under 70 characters) and include a body with a `## Summary` section (bullet points describing changes) and a `## Test plan` section (how to verify the changes).
+3. **Base branch:** Target `main` unless the user specifies otherwise.
+4. **Do not merge.** Only create the PR. Never merge it without explicit user approval.
+
 ## Important Conventions
 
 - The side panel is called "Explanation" (not "Audit") -- see agent-docs/DECISIONS.md
