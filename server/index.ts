@@ -119,16 +119,12 @@ app.get("/api/health", async (_req: Request, res: Response) => {
 app.post("/api/classify", rateLimit, async (req: Request, res: Response) => {
   const { query, reasoningLevel } = req.body as { query: unknown; reasoningLevel?: string };
 
-  if (!query || typeof query !== "string" || query.trim().length < 3) {
-    return res.status(400).json({ error: "Query must be at least 3 characters" });
-  }
-  if ((query as string).length > MAX_QUERY_LENGTH) {
-    return res.status(400).json({ error: `Query too long (max ${MAX_QUERY_LENGTH} chars)` });
-  }
+  const queryError = validateQuery(query);
+  if (queryError) return res.status(400).json({ error: queryError });
 
   try {
     const config = getReasoningConfig(reasoningLevel ?? "x-light");
-    const classifierResult = await classifyDomain(query.trim(), undefined, config);
+    const classifierResult = await classifyDomain((query as string).trim(), undefined, config);
     const domainProfile = classifierResult.result;
     const trace = classifierResult.trace;
     const slug = generateSlugFromProfile(domainProfile.ticker, domainProfile.companyName);
@@ -295,11 +291,12 @@ app.post("/api/chat", rateLimit, async (req: Request, res: Response) => {
 
 // ── Save / retrieve reports ─────────────────────────────────────────────────
 
-app.post("/api/reports/save", rateLimit, async (req: Request, res: Response) => {
+async function handleSaveReport(req: Request, res: Response): Promise<void> {
   const { report, slug, messages } = req.body as { report: unknown; slug?: string; messages?: ChatMessage[] };
 
   if (!report || typeof report !== "object" || !("meta" in report) || !("sections" in report) || !Array.isArray((report as Record<string, unknown>).sections) || !Array.isArray((report as Record<string, unknown>).findings)) {
-    return res.status(400).json({ error: "Invalid report payload" });
+    res.status(400).json({ error: "Invalid report payload" });
+    return;
   }
 
   try {
@@ -310,13 +307,10 @@ app.post("/api/reports/save", rateLimit, async (req: Request, res: Response) => 
     console.error("Save error:", err);
     res.status(500).json({ error: err.message || "Failed to save report" });
   }
-});
+}
 
-// Legacy endpoint — redirects to /api/reports/save
-app.post("/api/reports/publish", rateLimit, (req: Request, res: Response, next: NextFunction) => {
-  req.url = "/api/reports/save";
-  next();
-});
+app.post("/api/reports/save", rateLimit, handleSaveReport);
+app.post("/api/reports/publish", rateLimit, handleSaveReport); // legacy alias
 
 app.get("/api/reports", async (_req: Request, res: Response) => {
   try {

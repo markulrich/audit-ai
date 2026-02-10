@@ -63,9 +63,13 @@ export function repairTruncatedJson(text: string): string | null {
 
 /**
  * Extract a JSON object from text with surrounding commentary by finding
- * balanced brace pairs. Avoids the greedy regex pitfall.
+ * balanced brace pairs. Returns the largest valid JSON object found,
+ * which handles the case where commentary text contains small valid
+ * JSON snippets before the actual report payload.
  */
 export function extractJsonObject(text: string): string | null {
+  let best: string | null = null;
+
   for (let i = 0; i < text.length; i++) {
     if (text[i] !== "{") continue;
     let depth = 0;
@@ -84,15 +88,18 @@ export function extractJsonObject(text: string): string | null {
           const candidate: string = text.slice(i, j + 1);
           try {
             JSON.parse(candidate);
-            return candidate;
+            if (!best || candidate.length > best.length) {
+              best = candidate;
+            }
           } catch {
-            break; // Not valid JSON, try the next '{' in the outer loop
+            // Not valid JSON at this position
           }
+          break;
         }
       }
     }
   }
-  return null;
+  return best;
 }
 
 /**

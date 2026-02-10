@@ -20,8 +20,11 @@ FROM node:22-slim
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
-# tsx is needed at runtime (TypeScript server), install all deps then prune
-RUN npm ci --omit=dev && npm install tsx
+RUN npm ci --omit=dev
+
+# tsx is needed at runtime for TypeScript server — copy from builder
+# to preserve the lockfile-pinned version
+COPY --from=builder /app/node_modules/tsx ./node_modules/tsx
 
 # Copy built frontend and server source from builder
 COPY --from=builder /app/dist ./dist
