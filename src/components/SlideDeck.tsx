@@ -127,13 +127,12 @@ interface SlideDeckProps {
   saveState?: SaveState;
   onRetrySave?: () => void;
   onToggleView?: () => void;
-  onOpenChat?: () => void;
   isGenerating?: boolean;
 }
 
 // ─── Main SlideDeck Component ──────────────────────────────────────────────────
 
-export default function SlideDeck({ data, traceData, onBack, slug, saveState, onRetrySave, onToggleView, onOpenChat, isGenerating }: SlideDeckProps) {
+export default function SlideDeck({ data, traceData, onBack, slug, saveState, onRetrySave, onToggleView, isGenerating }: SlideDeckProps) {
   const [currentSlide, setCurrentSlide] = useState(0);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [showPanel, setShowPanel] = useState<boolean>(false);
@@ -346,37 +345,6 @@ export default function SlideDeck({ data, traceData, onBack, slug, saveState, on
           gap: 8,
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 12, minWidth: 0, flex: 1 }}>
-            {onOpenChat && (
-              <button
-                onClick={onOpenChat}
-                aria-label="Open chat"
-                style={{
-                  border: `1px solid ${DK.border}`,
-                  background: "transparent",
-                  borderRadius: 6,
-                  padding: "6px 8px",
-                  cursor: "pointer",
-                  fontSize: 16,
-                  lineHeight: 1,
-                  color: DK.text,
-                  flexShrink: 0,
-                  position: "relative",
-                }}
-              >
-                &#9776;
-                {isGenerating && (
-                  <span style={{
-                    position: "absolute",
-                    top: 2,
-                    right: 2,
-                    width: 6,
-                    height: 6,
-                    borderRadius: "50%",
-                    background: DK.orange,
-                  }} />
-                )}
-              </button>
-            )}
             {!isMobile && (
               <button
                 onClick={onBack}

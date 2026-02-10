@@ -96,13 +96,12 @@ interface ReportProps {
   saveState?: SaveState;
   onRetrySave?: () => void;
   onToggleView?: () => void;
-  onOpenChat?: () => void;
   isGenerating?: boolean;
 }
 
 // ─── Main Report Component ─────────────────────────────────────────────────────
 
-export default function Report({ data, traceData, onBack, slug, saveState, onRetrySave, onToggleView, onOpenChat, isGenerating }: ReportProps) {
+export default function Report({ data, traceData, onBack, slug, saveState, onRetrySave, onToggleView, isGenerating }: ReportProps) {
   const [activeId, setActiveId] = useState<string>("overview");
   const [showPanel, setShowPanel] = useState<boolean>(false); // for mobile panel toggle
   const [showDetails, setShowDetails] = useState<boolean>(false);
@@ -264,37 +263,6 @@ export default function Report({ data, traceData, onBack, slug, saveState, onRet
             borderBottom: `1px solid ${COLORS.border}`,
           }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
-              {onOpenChat && (
-                <button
-                  onClick={onOpenChat}
-                  aria-label="Open chat"
-                  style={{
-                    border: `1px solid ${COLORS.border}`,
-                    background: "#fff",
-                    borderRadius: 6,
-                    padding: "6px 8px",
-                    cursor: "pointer",
-                    fontSize: 16,
-                    lineHeight: 1,
-                    color: COLORS.text,
-                    flexShrink: 0,
-                    position: "relative",
-                  }}
-                >
-                  &#9776;
-                  {isGenerating && (
-                    <span style={{
-                      position: "absolute",
-                      top: 2,
-                      right: 2,
-                      width: 6,
-                      height: 6,
-                      borderRadius: "50%",
-                      background: COLORS.orange,
-                    }} />
-                  )}
-                </button>
-              )}
               <span
                 style={{
                   fontSize: 13,
