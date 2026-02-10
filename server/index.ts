@@ -119,12 +119,12 @@ app.get("/api/health", async (_req: Request, res: Response) => {
 app.post("/api/classify", rateLimit, async (req: Request, res: Response) => {
   const { query, reasoningLevel } = req.body as { query: unknown; reasoningLevel?: string };
 
-  const queryError = validateQuery(query);
-  if (queryError) return res.status(400).json({ error: queryError });
+  const validated = validateQuery(query);
+  if ("error" in validated) return res.status(400).json({ error: validated.error });
 
   try {
     const config = getReasoningConfig(reasoningLevel ?? "x-light");
-    const classifierResult = await classifyDomain((query as string).trim(), undefined, config);
+    const classifierResult = await classifyDomain(validated.query, undefined, config);
     const domainProfile = classifierResult.result;
     const trace = classifierResult.trace;
     const slug = generateSlugFromProfile(domainProfile.ticker, domainProfile.companyName);
@@ -211,15 +211,15 @@ function formatPipelineError(err: PipelineError): { message: string; detail: obj
   return { message, detail };
 }
 
-/** Validate a query string from a request body. Returns an error message or null. */
-function validateQuery(query: unknown): string | null {
+/** Validate a query from a request body. Returns { query } on success or { error } on failure. */
+function validateQuery(query: unknown): { query: string } | { error: string } {
   if (!query || typeof query !== "string" || query.trim().length < 3) {
-    return "Query must be at least 3 characters";
+    return { error: "Query must be at least 3 characters" };
   }
-  if ((query as string).length > MAX_QUERY_LENGTH) {
-    return `Query too long (max ${MAX_QUERY_LENGTH} chars)`;
+  if (query.length > MAX_QUERY_LENGTH) {
+    return { error: `Query too long (max ${MAX_QUERY_LENGTH} chars)` };
   }
-  return null;
+  return { query: query.trim() };
 }
 
 // ── SSE endpoint: generate an explainable report ────────────────────────────
@@ -227,13 +227,13 @@ function validateQuery(query: unknown): string | null {
 app.post("/api/generate", rateLimit, async (req: Request, res: Response) => {
   const { query, reasoningLevel } = req.body as { query: unknown; reasoningLevel?: string };
 
-  const queryError = validateQuery(query);
-  if (queryError) return res.status(400).json({ error: queryError });
+  const validated = validateQuery(query);
+  if ("error" in validated) return res.status(400).json({ error: validated.error });
 
   const { send, isAborted, cleanup } = initSSE(req, res);
 
   try {
-    await runPipeline((query as string).trim(), send, isAborted, reasoningLevel);
+    await runPipeline(validated.query, send, isAborted, reasoningLevel);
     if (!isAborted()) send("done", { success: true });
   } catch (thrown) {
     const err = thrown as PipelineError;
@@ -260,8 +260,8 @@ app.post("/api/chat", rateLimit, async (req: Request, res: Response) => {
     classifierTrace?: TraceData;
   };
 
-  const queryError = validateQuery(query);
-  if (queryError) return res.status(400).json({ error: queryError });
+  const validated = validateQuery(query);
+  if ("error" in validated) return res.status(400).json({ error: validated.error });
 
   const { send, isAborted, cleanup } = initSSE(req, res);
 
@@ -275,7 +275,7 @@ app.post("/api/chat", rateLimit, async (req: Request, res: Response) => {
     };
 
     const preClassified = reqDomainProfile ? { domainProfile: reqDomainProfile, trace: reqClassifierTrace || {} } : undefined;
-    await runPipeline((query as string).trim(), send, isAborted, reasoningLevel, conversationContext, preClassified);
+    await runPipeline(validated.query, send, isAborted, reasoningLevel, conversationContext, preClassified);
     if (!isAborted()) send("done", { success: true });
   } catch (thrown) {
     const err = thrown as PipelineError;
@@ -309,8 +309,8 @@ async function handleSaveReport(req: Request, res: Response): Promise<void> {
   }
 }
 
-app.post("/api/reports/save", rateLimit, handleSaveReport);
-app.post("/api/reports/publish", rateLimit, handleSaveReport); // legacy alias
+app.post("/api/reports/save", handleSaveReport);
+app.post("/api/reports/publish", handleSaveReport); // legacy alias
 
 app.get("/api/reports", async (_req: Request, res: Response) => {
   try {

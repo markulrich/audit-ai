@@ -23,31 +23,14 @@ body,
   color: #fff;
 }
 
-/* Remove default outline but provide a visible focus ring for keyboard users */
 textarea:focus,
 input:focus {
   outline: none;
-  box-shadow: 0 0 0 2px #1a1a2e40;
-}
-
-/* Only show the focus ring for keyboard navigation, not mouse clicks */
-textarea:focus:not(:focus-visible),
-input:focus:not(:focus-visible) {
-  box-shadow: none;
 }
 
 textarea:focus-visible,
 input:focus-visible {
   box-shadow: 0 0 0 2px #1a1a2e40;
-}
-
-/* Respect users who prefer reduced motion */
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
 }
 
 /* Mobile bottom sheet animations */
