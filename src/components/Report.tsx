@@ -47,20 +47,6 @@ function FindingSpan({ finding, isActive, onActivate }: FindingSpanProps) {
       }}
     >
       {finding.text}
-      {active && (
-        <span
-          style={{
-            position: "absolute",
-            bottom: -4,
-            left: "50%",
-            transform: "translateX(-50%)",
-            width: 5,
-            height: 5,
-            borderRadius: "50%",
-            background: color,
-          }}
-        />
-      )}
     </span>
   );
 }
@@ -498,20 +484,6 @@ export default function Report({ data, traceData, onBack, slug, saveState, onRet
             <span style={{ fontSize: 11, color: COLORS.textMuted, fontStyle: "italic" }}>
               {isMobile ? "Tap for methodology" : "Click for methodology"} →
             </span>
-            {isOverview && !isMobile && (
-              <span
-                style={{
-                  position: "absolute",
-                  bottom: -4,
-                  left: "50%",
-                  transform: "translateX(-50%)",
-                  width: 6,
-                  height: 6,
-                  borderRadius: "50%",
-                  background: overallColor,
-                }}
-              />
-            )}
           </div>
 
           {/* Masthead */}
