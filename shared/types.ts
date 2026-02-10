@@ -10,8 +10,8 @@ export interface EvidenceItem {
   url: string;
   category?: string;
   authority?: string;
-  /** Whether this evidence was fetched from a real web source (vs LLM knowledge) */
-  webVerified?: boolean;
+  /** true = URL and quote came from a real web search result. false/absent = unverified LLM knowledge. */
+  verified?: boolean;
 }
 
 // ── Explanation ─────────────────────────────────────────────────────────────

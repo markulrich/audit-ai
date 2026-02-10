@@ -108,8 +108,9 @@ Do NOT remove or modify these fields.
 `
     : "";
 
+  const verifiedCount = Array.isArray(evidence) ? evidence.filter((e) => e.verified).length : 0;
   const evidenceSummary = Array.isArray(evidence) && evidence.length > 0
-    ? `\n\nRAW EVIDENCE (${evidence.length} items collected by researcher):\n${JSON.stringify(evidence, null, 2)}\n\nUse this evidence to judge each finding. A finding backed by multiple high-authority evidence items deserves higher certainty. A finding with no evidence backing should score very low.`
+    ? `\n\nRAW EVIDENCE (${evidence.length} items, ${verifiedCount} verified from real web sources):\n${JSON.stringify(evidence, null, 2)}\n\nEvidence items with "verified": true have real URLs — the quote was extracted from actual web content. Items without verified: true are unverified LLM knowledge (url will be "general"/"various"/"derived"). Weight verified evidence much more heavily when scoring certainty.`
     : "";
 
   const params = {

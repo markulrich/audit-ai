@@ -320,13 +320,13 @@ async function researchWithWebSearch(
     const cleaned = extractText.replace(/```json\n?|\n?```/g, "").trim();
     const evidence: EvidenceItem[] = JSON.parse(cleaned);
 
-    // Tag evidence items: webVerified if the URL was in our search results
+    // Tag evidence: verified if the URL came from our actual search results
     const taggedEvidence = evidence.map((e) => ({
       ...e,
-      webVerified: realUrls.has(e.url),
+      verified: realUrls.has(e.url),
     }));
 
-    const webVerifiedCount = taggedEvidence.filter((e) => e.webVerified).length;
+    const verifiedCount = taggedEvidence.filter((e) => e.verified).length;
 
     // Merge traces from both LLM calls
     const mergedTrace: TraceData = {
@@ -337,7 +337,7 @@ async function researchWithWebSearch(
       },
       parsedOutput: {
         evidenceCount: taggedEvidence.length,
-        webVerifiedCount,
+        verifiedCount,
         totalSearchResults: totalResults,
         searchQueries,
         mode: "web_search",
@@ -356,7 +356,7 @@ async function researchWithWebSearch(
         const evidence: EvidenceItem[] = JSON.parse(match[0]);
         const taggedEvidence = evidence.map((ev) => ({
           ...ev,
-          webVerified: realUrls.has(ev.url),
+          verified: realUrls.has(ev.url),
         }));
         return {
           result: taggedEvidence,
