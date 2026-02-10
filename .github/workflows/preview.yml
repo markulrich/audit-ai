@@ -2,7 +2,7 @@ name: Preview Deploy
 
 on:
   pull_request:
-    types: [opened, reopened, synchronize, closed]
+    types: [opened, reopened, synchronize]
 
 concurrency:
   group: preview-${{ github.event.pull_request.number }}
@@ -15,7 +15,6 @@ env:
 
 jobs:
   deploy-preview:
-    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
@@ -88,47 +87,6 @@ jobs:
             });
             const existing = comments.find(c =>
               c.user.type === 'Bot' && c.body.includes('Preview deployed')
-            );
-
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body,
-              });
-            }
-
-  teardown-preview:
-    if: github.event.action == 'closed'
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-
-    steps:
-      - name: Update PR comment with teardown notice
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
-        with:
-          script: |
-            const url = `https://${process.env.PREVIEW_APP}.fly.dev`;
-            const closedAt = new Date().toISOString();
-            const destroyAt = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
-            const body = `**PR closed** — preview will be destroyed soon\n\n${url}\n\n_Preview will be destroyed ~12 hours after PR close (around ${destroyAt})._`;
-
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-            const existing = comments.find(c =>
-              c.user.type === 'Bot' && c.body.includes('Preview deploy')
             );
 
             if (existing) {

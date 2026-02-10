@@ -12,6 +12,8 @@ env:
 jobs:
   cleanup-stale-previews:
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
 
     steps:
       - name: Setup flyctl
@@ -37,6 +39,29 @@ jobs:
 
             const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
             const now = Date.now();
+
+            async function updatePrComment(prNumber, appName) {
+              const url = `https://${appName}.fly.dev`;
+              const body = `**Preview destroyed**\n\n~~${url}~~\n\n_Preview was automatically cleaned up 12 hours after PR close._`;
+
+              const { data: comments } = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+              });
+              const existing = comments.find(c =>
+                c.user.type === 'Bot' && c.body.includes('Preview deployed')
+              );
+
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: existing.id,
+                  body,
+                });
+              }
+            }
 
             for (const app of previewApps) {
               const match = app.Name.match(/^audit-ai-pr-(\d+)$/);
@@ -72,6 +97,7 @@ jobs:
                 try {
                   execSync(`flyctl apps destroy ${app.Name} --yes`, { encoding: 'utf8', stdio: 'inherit' });
                   console.log(`Destroyed ${app.Name}.`);
+                  await updatePrComment(prNumber, app.Name);
                 } catch (destroyErr) {
                   console.error(`Failed to destroy ${app.Name}: ${destroyErr.message}`);
                 }
