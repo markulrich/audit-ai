@@ -1,5 +1,6 @@
 import { client as anthropicClient, ANTHROPIC_MODEL } from "./anthropic-client";
 import { checkS3Health } from "./storage";
+import { isWebSearchAvailable } from "./web-search";
 import { execSync } from "child_process";
 import { readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
@@ -114,6 +115,7 @@ export interface HealthResponse {
   services: {
     anthropic: ServiceStatus;
     s3: ServiceStatus;
+    webSearch: ServiceStatus;
   };
   build: {
     commitSha: string;
@@ -152,9 +154,16 @@ export async function getHealthStatus(): Promise<HealthResponse> {
     checkS3(),
   ]);
 
-  const allServices = [anthropic, s3Status];
-  const anyError = allServices.some((s) => s.status === "error");
-  const allOk = allServices.every((s) => s.status === "ok");
+  const webSearch: ServiceStatus = {
+    status: isWebSearchAvailable() ? "ok" : "unconfigured",
+    latencyMs: 0,
+    ...(isWebSearchAvailable() ? {} : { error: "BRAVE_API_KEY is not set — using LLM knowledge only" }),
+  };
+
+  // Web search is optional — don't count it as an error
+  const coreServices = [anthropic, s3Status];
+  const anyError = coreServices.some((s) => s.status === "error");
+  const allOk = coreServices.every((s) => s.status === "ok");
 
   const mem = process.memoryUsage();
 
@@ -163,6 +172,7 @@ export async function getHealthStatus(): Promise<HealthResponse> {
     services: {
       anthropic,
       s3: s3Status,
+      webSearch,
     },
     build: buildInfo,
     runtime: {

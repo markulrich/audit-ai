@@ -10,6 +10,8 @@ export interface EvidenceItem {
   url: string;
   category?: string;
   authority?: string;
+  /** true = URL and quote came from a real web search result. false/absent = unverified LLM knowledge. */
+  verified?: boolean;
 }
 
 // ── Explanation ─────────────────────────────────────────────────────────────
@@ -141,9 +143,13 @@ export interface ReasoningConfig {
   keyStatsCount: number;
   methodologyLength: string;
   methodologySources: string;
-  removalThreshold: number;
+  removalThreshold?: number; // deprecated — threshold is now computed dynamically from evidence quality
   skipVerifier?: boolean;
   parallelDraftAndResearch?: boolean;
+  /** Number of web search queries to run (0 = skip web search, use LLM knowledge only) */
+  webSearchQueries?: number;
+  /** Max results to fetch per search query */
+  webSearchResultsPerQuery?: number;
 }
 
 // ── Trace Types ─────────────────────────────────────────────────────────────

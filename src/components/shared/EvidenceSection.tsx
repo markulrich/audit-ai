@@ -38,10 +38,21 @@ export default function EvidenceSection({ title, items, color }: EvidenceSection
         >
           <div style={{ fontWeight: 600, color: COLORS.text, marginBottom: 2, fontSize: 11 }}>
             {ev.source}
+            {!ev.verified && ev.url !== "internal" && (
+              <span style={{ fontSize: 9, fontWeight: 400, color: COLORS.textMuted, marginLeft: 6 }}>
+                unverified
+              </span>
+            )}
           </div>
-          <div style={{ color: COLORS.textSecondary, fontStyle: "italic" }}>
-            &ldquo;{ev.quote}&rdquo;
-          </div>
+          {ev.verified ? (
+            <div style={{ color: COLORS.textSecondary, fontStyle: "italic" }}>
+              &ldquo;{ev.quote}&rdquo;
+            </div>
+          ) : (
+            <div style={{ color: COLORS.textMuted, fontSize: 11 }}>
+              {ev.quote}
+            </div>
+          )}
           {ev.url &&
             ev.url !== "general" &&
             ev.url !== "various" &&

@@ -22,6 +22,8 @@ export const REASONING_LEVELS: Record<string, ReasoningConfig> = {
 
     // Researcher
     evidenceMinItems: 2,
+    webSearchQueries: 2,
+    webSearchResultsPerQuery: 3,
 
     // Synthesizer
     totalFindings: "3-5",
@@ -34,7 +36,7 @@ export const REASONING_LEVELS: Record<string, ReasoningConfig> = {
     // Verifier
     methodologyLength: "1 sentence",
     methodologySources: "1",
-    removalThreshold: 0, // keep all findings regardless of certainty
+    // removalThreshold removed — now computed dynamically from evidence quality
 
     // Speed optimizations
     skipVerifier: true, // assign default certainty scores instead of LLM call
@@ -51,6 +53,8 @@ export const REASONING_LEVELS: Record<string, ReasoningConfig> = {
     verifierModel: undefined,
 
     evidenceMinItems: 20,
+    webSearchQueries: 5,
+    webSearchResultsPerQuery: 5,
 
     totalFindings: "12-18",
     findingsPerSection: "2-3",
@@ -61,7 +65,6 @@ export const REASONING_LEVELS: Record<string, ReasoningConfig> = {
 
     methodologyLength: "2-3 sentences",
     methodologySources: "2-3",
-    removalThreshold: 25,
   },
 
   heavy: {
@@ -74,6 +77,8 @@ export const REASONING_LEVELS: Record<string, ReasoningConfig> = {
     verifierModel: "claude-sonnet-4-5",
 
     evidenceMinItems: 40,
+    webSearchQueries: 8,
+    webSearchResultsPerQuery: 5,
 
     totalFindings: "25-35",
     findingsPerSection: "3-5",
@@ -84,7 +89,6 @@ export const REASONING_LEVELS: Record<string, ReasoningConfig> = {
 
     methodologyLength: "3-5 sentences",
     methodologySources: "3-4",
-    removalThreshold: 25,
   },
 
   "x-heavy": {
@@ -97,6 +101,8 @@ export const REASONING_LEVELS: Record<string, ReasoningConfig> = {
     verifierModel: "claude-opus-4-6",
 
     evidenceMinItems: 60,
+    webSearchQueries: 12,
+    webSearchResultsPerQuery: 8,
 
     totalFindings: "35-50",
     findingsPerSection: "4-7",
@@ -107,7 +113,6 @@ export const REASONING_LEVELS: Record<string, ReasoningConfig> = {
 
     methodologyLength: "5-8 sentences",
     methodologySources: "4-6",
-    removalThreshold: 25,
   },
 };
 

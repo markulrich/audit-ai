@@ -465,7 +465,7 @@ export async function runPipeline(
     });
 
     try {
-      const verifierResult = await verify(query, domainProfile, draft, send, config, conversationContext);
+      const verifierResult = await verify(query, domainProfile, draft, evidence, send, config, conversationContext);
       report = verifierResult.result;
       verifierTrace = verifierResult.trace;
     } catch (err) {

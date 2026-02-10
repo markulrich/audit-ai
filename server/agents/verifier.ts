@@ -5,6 +5,7 @@ import type {
   Finding,
   Section,
   ContentItem,
+  EvidenceItem,
   ReasoningConfig,
   SendFn,
   AgentResult,
@@ -15,7 +16,7 @@ import type {
 
 /**
  * Removes finding references from section content arrays when the finding
- * has been deleted (e.g., certainty < 25%). Also collapses adjacent text nodes
+ * has been deleted. Also collapses adjacent text nodes
  * and removes sections that have no findings left.
  *
  * Preserves title_slide sections even if they have no findings (they typically
@@ -53,15 +54,21 @@ function cleanOrphanedRefs(report: Report): void {
 /**
  * Verification Agent — the adversarial skeptic.
  *
- * Reviews every finding, searches for contradictions,
- * assigns certainty scores, and removes weak findings.
+ * Reviews every finding against the raw evidence collected by the researcher,
+ * searches for contradictions, assigns certainty scores, and may remove
+ * findings that have no evidence backing.
  *
  * THIS AGENT'S JOB IS TO LOWER CERTAINTY, NOT RAISE IT.
+ *
+ * The verifier receives both the draft report AND the raw evidence so it can
+ * judge whether findings accurately represent the collected data and whether
+ * there's sufficient evidence to support each claim.
  */
 export async function verify(
   query: string,
   domainProfile: DomainProfile,
   draft: Report,
+  evidence: EvidenceItem[],
   send: SendFn | undefined,
   config: Partial<ReasoningConfig> = {},
   conversationContext?: ConversationContext,
@@ -69,7 +76,6 @@ export async function verify(
   const { ticker, companyName } = domainProfile;
   const methodologyLength = config.methodologyLength || "3-5 sentences";
   const methodologySources = config.methodologySources || "3-4";
-  const removalThreshold = config.removalThreshold ?? 25;
 
   const isSlides = domainProfile.outputFormat === "slide_deck";
   const formatLabel = isSlides ? "slide deck" : "equity research report";
@@ -102,22 +108,39 @@ Do NOT remove or modify these fields.
 `
     : "";
 
+  const verifiedCount = Array.isArray(evidence) ? evidence.filter((e) => e.verified).length : 0;
+  const evidenceSummary = Array.isArray(evidence) && evidence.length > 0
+    ? `\n\nRAW EVIDENCE (${evidence.length} items, ${verifiedCount} verified from real web sources):\n${JSON.stringify(evidence, null, 2)}\n\nEvidence items with "verified": true have real URLs — the quote was extracted from actual web content. Items without verified: true are unverified LLM knowledge (url will be "general"/"various"/"derived"). Weight verified evidence much more heavily when scoring certainty.`
+    : "";
+
   const params = {
     ...(config.verifierModel && { model: config.verifierModel }),
     system: `You are an adversarial fact-checker reviewing a draft ${formatLabel} on ${companyName} (${ticker}).
 
 Be skeptical. Challenge every claim. Your job is to catch errors before they reach the client.
 ${contextSection}${slideFieldInstruction}
+You are given both the draft report AND the raw evidence that was collected. Use the evidence to judge each finding:
+
 For each finding:
-1. Verify factual accuracy against your knowledge
-2. Add contradicting evidence or caveats as "contraryEvidence"
-3. Assign a certainty score (1-99%):
-   - 95-99%: Factual, 3+ corroborating sources, 0 contradictions
-   - 85-94%: Strong, 2+ sources agree
-   - 70-84%: Moderate, credible with caveats or forward-looking
-   - 50-69%: Mixed, significant uncertainty
-   - 25-49%: Weak or speculative
-   - <${removalThreshold}%: Remove entirely${removalThreshold === 0 ? " (removal disabled)" : ""}
+1. Check if the finding is supported by the raw evidence provided
+2. Verify factual accuracy against your knowledge
+3. Add contradicting evidence or caveats as "contraryEvidence"
+4. Assign a certainty score (1-99%):
+   - 95-99%: Factual, backed by 3+ verified (verified: true) evidence items, 0 contradictions
+   - 85-94%: Strong, 2+ verified evidence items agree
+   - 70-84%: Moderate, at least 1 verified source, credible with caveats
+   - 50-69%: Mixed, significant uncertainty or only partially verified
+   - 25-49%: Weak or speculative, little evidence support
+   - 1-24%: Very weak, no real evidence backing
+
+CERTAINTY CAP FOR UNVERIFIED EVIDENCE:
+- If a finding is supported ONLY by unverified evidence (verified: false or absent), its certainty MUST NOT exceed 50%. Unverified evidence is LLM knowledge — it could be hallucinated.
+- Only verified evidence (verified: true, with a real URL) can push certainty above 50%.
+
+CRITICAL RULES FOR REMOVAL:
+- The more high-certainty findings you have, the HIGHER your bar should be for keeping weaker ones. If most findings are 85%+, remove anything below ~40%. If most findings are moderate (60-80%), keep everything above ~25%.
+- If evidence quality is poor overall (few items, weak sources), keep ALL findings but score them low. A report full of 30-50% findings is better than an empty report.
+- NEVER remove all findings. The report must always contain results — even if certainty is very low.
 
 Output schema (frontend depends on exact placement):
 - "certainty" at finding ROOT level (not inside explanation)
@@ -126,7 +149,6 @@ Output schema (frontend depends on exact placement):
 
 Also:
 - Add "overallCertainty" to meta (arithmetic mean of remaining finding scores)
-- ${removalThreshold > 0 ? `Remove findings with certainty < ${removalThreshold}% from findings array and section content` : "Keep all findings regardless of score"}
 - You may improve explanation text to add context or corrections
 - Don't change meta or section structure (except removing deleted finding refs)
 
@@ -137,7 +159,7 @@ Return complete report JSON. No markdown fences.`,
     messages: [
       {
         role: "user" as const,
-        content: `Review this draft ${formatLabel} on ${companyName} (${ticker}). Be skeptical — find errors, weak claims, and missing caveats.\n\n${JSON.stringify(draft, null, 2)}`,
+        content: `Review this draft ${formatLabel} on ${companyName} (${ticker}). Be skeptical — find errors, weak claims, and missing caveats.${evidenceSummary}\n\nDRAFT REPORT:\n${JSON.stringify(draft, null, 2)}`,
       },
     ],
   };
@@ -171,8 +193,25 @@ Return complete report JSON. No markdown fences.`,
     const cleaned = text.replace(/```json\n?|\n?```/g, "").trim();
     const report: Report = JSON.parse(cleaned);
 
-    // Ensure meta and overallCertainty exist
+    // Ensure meta exists
     if (!report.meta) report.meta = {} as Report["meta"];
+
+    // If verifier returned 0 findings, fall back to draft findings with low certainty
+    if (!report.findings?.length && draft.findings?.length) {
+      report.findings = draft.findings.map((f) => ({
+        ...f,
+        certainty: f.certainty || 15,
+        explanation: {
+          ...f.explanation,
+          contraryEvidence: f.explanation?.contraryEvidence || [
+            { source: "Verification", quote: "Could not verify — verifier returned no findings", url: "internal" },
+          ],
+        },
+      }));
+      report.sections = draft.sections || report.sections;
+    }
+
+    // Compute overallCertainty from findings
     if (!report.meta.overallCertainty && report.findings?.length > 0) {
       report.meta.overallCertainty = Math.round(
         report.findings.reduce((s: number, f: Finding) => s + (f.certainty || 50), 0) /
