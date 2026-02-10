@@ -110,11 +110,13 @@ interface ReportProps {
   saveState?: SaveState;
   onRetrySave?: () => void;
   onToggleView?: () => void;
+  onOpenChat?: () => void;
+  isGenerating?: boolean;
 }
 
 // ─── Main Report Component ─────────────────────────────────────────────────────
 
-export default function Report({ data, traceData, onBack, slug, saveState, onRetrySave, onToggleView }: ReportProps) {
+export default function Report({ data, traceData, onBack, slug, saveState, onRetrySave, onToggleView, onOpenChat, isGenerating }: ReportProps) {
   const [activeId, setActiveId] = useState<string>("overview");
   const [showPanel, setShowPanel] = useState<boolean>(false); // for mobile panel toggle
   const [showDetails, setShowDetails] = useState<boolean>(false);
@@ -262,9 +264,87 @@ export default function Report({ data, traceData, onBack, slug, saveState, onRet
     >
       {/* ── Report Panel ── */}
       <div style={{ flex: 1, overflow: "auto" }}>
-        <div style={{ maxWidth: 780, margin: "0 auto", padding: isMobile ? "20px 16px 60px" : "32px 40px 60px" }}>
+        {/* Mobile header bar */}
+        {isMobile && (
+          <div style={{
+            position: "sticky",
+            top: 0,
+            zIndex: 50,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "8px 12px",
+            background: "#fff",
+            borderBottom: `1px solid ${COLORS.border}`,
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, flex: 1 }}>
+              {onOpenChat && (
+                <button
+                  onClick={onOpenChat}
+                  aria-label="Open chat"
+                  style={{
+                    border: `1px solid ${COLORS.border}`,
+                    background: "#fff",
+                    borderRadius: 6,
+                    padding: "6px 8px",
+                    cursor: "pointer",
+                    fontSize: 16,
+                    lineHeight: 1,
+                    color: COLORS.text,
+                    flexShrink: 0,
+                    position: "relative",
+                  }}
+                >
+                  &#9776;
+                  {isGenerating && (
+                    <span style={{
+                      position: "absolute",
+                      top: 2,
+                      right: 2,
+                      width: 6,
+                      height: 6,
+                      borderRadius: "50%",
+                      background: COLORS.orange,
+                    }} />
+                  )}
+                </button>
+              )}
+              <span
+                style={{
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: COLORS.accent,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  minWidth: 0,
+                }}
+              >
+                {meta?.title || "Report"}
+              </span>
+            </div>
+            <button
+              onClick={onBack}
+              style={{
+                padding: "4px 10px",
+                fontSize: 11,
+                fontWeight: 600,
+                border: `1px solid ${COLORS.border}`,
+                borderRadius: 4,
+                background: "#fff",
+                color: COLORS.textSecondary,
+                cursor: "pointer",
+                flexShrink: 0,
+                marginLeft: 8,
+              }}
+            >
+              + New
+            </button>
+          </div>
+        )}
+        <div style={{ maxWidth: 780, margin: "0 auto", padding: isMobile ? "16px 16px 80px" : "32px 40px 60px" }}>
           {/* Top buttons */}
-          <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 6, marginBottom: isMobile ? 10 : 16, flexWrap: "wrap", alignItems: "center" }}>
             {traceData && traceData.length > 0 && (
               <button
                 onClick={() => setShowDetails(true)}
@@ -388,17 +468,17 @@ export default function Report({ data, traceData, onBack, slug, saveState, onRet
             style={{
               cursor: "pointer",
               display: "flex",
-              alignItems: "center",
+              alignItems: isMobile ? "flex-start" : "center",
               justifyContent: "space-between",
-              padding: "10px 16px",
+              flexDirection: isMobile ? "column" : "row",
+              padding: isMobile ? "10px 12px" : "10px 16px",
               marginBottom: 16,
               background: isOverview ? overallColor + "0a" : COLORS.panelBg,
               border: `1.5px solid ${isOverview ? overallColor + "40" : COLORS.border}`,
               borderRadius: 4,
               transition: "all 0.2s",
               position: "relative",
-              flexWrap: "wrap",
-              gap: 8,
+              gap: isMobile ? 6 : 8,
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -435,8 +515,8 @@ export default function Report({ data, traceData, onBack, slug, saveState, onRet
           </div>
 
           {/* Masthead */}
-          <div style={{ borderBottom: `3px solid ${COLORS.accent}`, paddingBottom: 16, marginBottom: 6 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12 }}>
+          <div style={{ borderBottom: `3px solid ${COLORS.accent}`, paddingBottom: isMobile ? 12 : 16, marginBottom: 6 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexDirection: isMobile ? "column" : "row", gap: isMobile ? 8 : 12 }}>
               <div>
                 <div
                   style={{
@@ -500,20 +580,21 @@ export default function Report({ data, traceData, onBack, slug, saveState, onRet
           {keyStats.length > 0 && (
             <div
               style={{
-                display: "flex",
+                display: isMobile ? "grid" : "flex",
+                gridTemplateColumns: isMobile ? "1fr 1fr" : undefined,
                 margin: "0 0 24px",
                 borderBottom: `1px solid ${COLORS.border}`,
-                flexWrap: isMobile ? "wrap" : "nowrap",
+                borderTop: isMobile ? `1px solid ${COLORS.border}` : "none",
               }}
             >
               {keyStats.map((item: KeyStat, i: number) => (
                 <div
                   key={i}
                   style={{
-                    flex: isMobile ? "1 1 33%" : 1,
-                    padding: "10px 0",
+                    flex: isMobile ? undefined : 1,
+                    padding: isMobile ? "8px 4px" : "10px 0",
                     textAlign: "center",
-                    borderRight: !isMobile && i < keyStats.length - 1 ? `1px solid ${COLORS.border}` : "none",
+                    borderRight: !isMobile && i < keyStats.length - 1 ? `1px solid ${COLORS.border}` : isMobile && i % 2 === 0 ? `1px solid ${COLORS.border}` : "none",
                     borderBottom: isMobile ? `1px solid ${COLORS.border}` : "none",
                   }}
                 >
@@ -541,29 +622,29 @@ export default function Report({ data, traceData, onBack, slug, saveState, onRet
             aria-label="Certainty color legend"
             style={{
               display: "flex",
-              gap: isMobile ? 10 : 16,
+              gap: isMobile ? 8 : 16,
               alignItems: "center",
-              marginBottom: 24,
-              padding: "8px 12px",
+              marginBottom: isMobile ? 16 : 24,
+              padding: isMobile ? "6px 10px" : "8px 12px",
               background: COLORS.panelBg,
               borderRadius: 4,
               border: `1px solid ${COLORS.border}`,
-              fontSize: 11,
+              fontSize: isMobile ? 10 : 11,
               color: COLORS.textMuted,
               flexWrap: "wrap",
             }}
           >
-            <span style={{ fontWeight: 600 }}>Finding certainty:</span>
+            <span style={{ fontWeight: 600 }}>Certainty:</span>
             <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <span style={{ width: 8, height: 8, borderRadius: "50%", background: COLORS.green, display: "inline-block" }} />
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: COLORS.green, display: "inline-block" }} />
               &gt;90%
             </span>
             <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <span style={{ width: 8, height: 8, borderRadius: "50%", background: COLORS.orange, display: "inline-block" }} />
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: COLORS.orange, display: "inline-block" }} />
               50–90%
             </span>
             <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <span style={{ width: 8, height: 8, borderRadius: "50%", background: COLORS.red, display: "inline-block" }} />
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: COLORS.red, display: "inline-block" }} />
               &lt;50%
             </span>
             {!isMobile && (
@@ -580,12 +661,12 @@ export default function Report({ data, traceData, onBack, slug, saveState, onRet
               <div key={section.id}>
                 <h2
                   style={{
-                    fontSize: 14,
+                    fontSize: isMobile ? 13 : 14,
                     fontWeight: 700,
                     textTransform: "uppercase",
                     letterSpacing: 1.0,
                     color: COLORS.accent,
-                    margin: "28px 0 14px",
+                    margin: isMobile ? "20px 0 10px" : "28px 0 14px",
                     paddingBottom: 6,
                     borderBottom: `2px solid ${COLORS.accent}`,
                   }}
@@ -593,7 +674,7 @@ export default function Report({ data, traceData, onBack, slug, saveState, onRet
                   {SECTION_TITLES[section.id] || section.title || section.id}
                 </h2>
                 {paragraphs.map((paraItems: ContentItem[], pi: number) => (
-                  <p key={pi} style={{ fontSize: 14, lineHeight: 1.85, color: COLORS.textSecondary, margin: "0 0 14px" }}>
+                  <p key={pi} style={{ fontSize: isMobile ? 13 : 14, lineHeight: isMobile ? 1.95 : 1.85, color: COLORS.textSecondary, margin: "0 0 14px" }}>
                     {paraItems.map((item: ContentItem, i: number) => renderContent(item, i))}
                   </p>
                 ))}
@@ -639,16 +720,17 @@ export default function Report({ data, traceData, onBack, slug, saveState, onRet
               style={{
                 position: "fixed",
                 bottom: 20,
-                right: 20,
-                width: 48,
-                height: 48,
+                right: 16,
+                width: 44,
+                height: 44,
                 borderRadius: "50%",
                 background: COLORS.accent,
                 color: "#fff",
                 border: "none",
-                fontSize: 20,
+                fontSize: 18,
+                fontWeight: 700,
                 cursor: "pointer",
-                boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
+                boxShadow: "0 2px 12px rgba(0,0,0,0.25)",
                 zIndex: 100,
                 display: "flex",
                 alignItems: "center",
@@ -658,7 +740,7 @@ export default function Report({ data, traceData, onBack, slug, saveState, onRet
               ?
             </button>
           )}
-          {/* Mobile panel overlay */}
+          {/* Mobile panel overlay — bottom sheet */}
           {showPanel && (
             <div
               style={{
@@ -669,48 +751,54 @@ export default function Report({ data, traceData, onBack, slug, saveState, onRet
                 flexDirection: "column",
               }}
             >
+              {/* Tappable backdrop */}
               <div
                 onClick={() => setShowPanel(false)}
                 style={{
-                  flex: "0 0 15vh",
-                  background: "rgba(0,0,0,0.3)",
+                  flex: "0 0 10vh",
+                  background: "rgba(0,0,0,0.35)",
                 }}
               />
+              {/* Bottom sheet */}
               <div
                 style={{
                   flex: 1,
                   background: COLORS.cardBg,
-                  borderTopLeftRadius: 12,
-                  borderTopRightRadius: 12,
+                  borderTopLeftRadius: 16,
+                  borderTopRightRadius: 16,
                   overflow: "hidden",
                   display: "flex",
                   flexDirection: "column",
+                  boxShadow: "0 -4px 20px rgba(0,0,0,0.12)",
                 }}
               >
+                {/* Handle bar + close */}
                 <div
+                  onClick={() => setShowPanel(false)}
                   style={{
-                    padding: "8px 12px 0",
+                    padding: "10px 12px 6px",
                     display: "flex",
                     justifyContent: "center",
                     alignItems: "center",
                     position: "relative",
+                    cursor: "pointer",
                   }}
                 >
                   <div
                     style={{
-                      width: 36,
+                      width: 40,
                       height: 4,
                       borderRadius: 2,
                       background: COLORS.border,
                     }}
                   />
                   <button
-                    onClick={() => setShowPanel(false)}
+                    onClick={(e) => { e.stopPropagation(); setShowPanel(false); }}
                     aria-label="Close explanation panel"
                     style={{
                       position: "absolute",
                       right: 12,
-                      top: 4,
+                      top: 6,
                       border: "none",
                       background: "transparent",
                       fontSize: 18,

@@ -127,11 +127,13 @@ interface SlideDeckProps {
   saveState?: SaveState;
   onRetrySave?: () => void;
   onToggleView?: () => void;
+  onOpenChat?: () => void;
+  isGenerating?: boolean;
 }
 
 // ─── Main SlideDeck Component ──────────────────────────────────────────────────
 
-export default function SlideDeck({ data, traceData, onBack, slug, saveState, onRetrySave, onToggleView }: SlideDeckProps) {
+export default function SlideDeck({ data, traceData, onBack, slug, saveState, onRetrySave, onToggleView, onOpenChat, isGenerating }: SlideDeckProps) {
   const [currentSlide, setCurrentSlide] = useState(0);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [showPanel, setShowPanel] = useState<boolean>(false);
@@ -343,21 +345,54 @@ export default function SlideDeck({ data, traceData, onBack, slug, saveState, on
           flexWrap: "wrap",
           gap: 8,
         }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <button
-              onClick={onBack}
-              style={{
-                border: `1px solid ${DK.border}`,
-                background: "transparent",
-                borderRadius: 4,
-                padding: "4px 12px",
-                fontSize: 12,
-                color: DK.textDim,
-                cursor: "pointer",
-              }}
-            >
-              Back
-            </button>
+          <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 12, minWidth: 0, flex: 1 }}>
+            {onOpenChat && (
+              <button
+                onClick={onOpenChat}
+                aria-label="Open chat"
+                style={{
+                  border: `1px solid ${DK.border}`,
+                  background: "transparent",
+                  borderRadius: 6,
+                  padding: "6px 8px",
+                  cursor: "pointer",
+                  fontSize: 16,
+                  lineHeight: 1,
+                  color: DK.text,
+                  flexShrink: 0,
+                  position: "relative",
+                }}
+              >
+                &#9776;
+                {isGenerating && (
+                  <span style={{
+                    position: "absolute",
+                    top: 2,
+                    right: 2,
+                    width: 6,
+                    height: 6,
+                    borderRadius: "50%",
+                    background: DK.orange,
+                  }} />
+                )}
+              </button>
+            )}
+            {!isMobile && (
+              <button
+                onClick={onBack}
+                style={{
+                  border: `1px solid ${DK.border}`,
+                  background: "transparent",
+                  borderRadius: 4,
+                  padding: "4px 12px",
+                  fontSize: 12,
+                  color: DK.textDim,
+                  cursor: "pointer",
+                }}
+              >
+                Back
+              </button>
+            )}
             {onToggleView && (
               <button
                 onClick={onToggleView}
@@ -375,7 +410,15 @@ export default function SlideDeck({ data, traceData, onBack, slug, saveState, on
                 View as Report
               </button>
             )}
-            <span style={{ fontSize: 13, fontWeight: 600, color: DK.text }}>
+            <span style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: DK.text,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              minWidth: 0,
+            }}>
               {meta?.title || "Slide Deck"}
             </span>
           </div>
@@ -535,7 +578,7 @@ export default function SlideDeck({ data, traceData, onBack, slug, saveState, on
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          padding: "8px 24px 12px",
+          padding: isMobile ? "8px 12px 12px" : "8px 24px 12px",
           borderTop: `1px solid ${DK.border}`,
           flexShrink: 0,
         }}>
@@ -546,23 +589,29 @@ export default function SlideDeck({ data, traceData, onBack, slug, saveState, on
               border: `1px solid ${DK.border}`,
               background: "transparent",
               borderRadius: 4,
-              padding: "6px 16px",
+              padding: isMobile ? "8px 14px" : "6px 16px",
               fontSize: 13,
               color: currentSlide === 0 ? DK.border : DK.text,
               cursor: currentSlide === 0 ? "not-allowed" : "pointer",
             }}
           >
-            Previous
+            {isMobile ? "←" : "Previous"}
           </button>
 
-          {/* Speaker notes toggle */}
-          {currentSection?.speakerNotes && (
+          {/* Speaker notes toggle — hidden on mobile */}
+          {!isMobile && currentSection?.speakerNotes && (
             <details style={{ fontSize: 12, color: DK.textDim, maxWidth: 400, textAlign: "center" }}>
               <summary style={{ cursor: "pointer", fontWeight: 500 }}>Speaker Notes</summary>
               <p style={{ margin: "6px 0 0", lineHeight: 1.6, fontStyle: "italic" }}>
                 {currentSection.speakerNotes}
               </p>
             </details>
+          )}
+
+          {isMobile && (
+            <span style={{ fontSize: 12, color: DK.textDim, fontWeight: 500 }}>
+              {currentSlide + 1} / {safeSections.length}
+            </span>
           )}
 
           <button
@@ -573,14 +622,14 @@ export default function SlideDeck({ data, traceData, onBack, slug, saveState, on
               background: currentSlide >= safeSections.length - 1 ? "transparent" : DK.accent,
               borderColor: currentSlide >= safeSections.length - 1 ? DK.border : DK.accent,
               borderRadius: 4,
-              padding: "6px 16px",
+              padding: isMobile ? "8px 14px" : "6px 16px",
               fontSize: 13,
               color: currentSlide >= safeSections.length - 1 ? DK.border : "#fff",
               cursor: currentSlide >= safeSections.length - 1 ? "not-allowed" : "pointer",
               fontWeight: 600,
             }}
           >
-            Next
+            {isMobile ? "→" : "Next"}
           </button>
         </div>
       </div>
@@ -616,22 +665,26 @@ export default function SlideDeck({ data, traceData, onBack, slug, saveState, on
           )}
           {showPanel && activeId && (
             <div style={{ position: "fixed", inset: 0, zIndex: 200, display: "flex", flexDirection: "column" }}>
-              <div onClick={() => setShowPanel(false)} style={{ flex: "0 0 15vh", background: "rgba(0,0,0,0.5)" }} />
+              <div onClick={() => setShowPanel(false)} style={{ flex: "0 0 10vh", background: "rgba(0,0,0,0.4)" }} />
               <div style={{
                 flex: 1,
                 background: "#fff",
-                borderTopLeftRadius: 12,
-                borderTopRightRadius: 12,
+                borderTopLeftRadius: 16,
+                borderTopRightRadius: 16,
                 overflow: "hidden",
                 display: "flex",
                 flexDirection: "column",
+                boxShadow: "0 -4px 20px rgba(0,0,0,0.15)",
               }}>
-                <div style={{ padding: "8px 12px 0", display: "flex", justifyContent: "center", alignItems: "center", position: "relative" }}>
-                  <div style={{ width: 36, height: 4, borderRadius: 2, background: "#e2e4ea" }} />
+                <div
+                  onClick={() => setShowPanel(false)}
+                  style={{ padding: "10px 12px 6px", display: "flex", justifyContent: "center", alignItems: "center", position: "relative", cursor: "pointer" }}
+                >
+                  <div style={{ width: 40, height: 4, borderRadius: 2, background: "#e2e4ea" }} />
                   <button
-                    onClick={() => setShowPanel(false)}
+                    onClick={(e) => { e.stopPropagation(); setShowPanel(false); }}
                     aria-label="Close explanation panel"
-                    style={{ position: "absolute", right: 12, top: 4, border: "none", background: "transparent", fontSize: 18, color: "#8a8ca5", cursor: "pointer", padding: "4px 8px", borderRadius: 4 }}
+                    style={{ position: "absolute", right: 12, top: 6, border: "none", background: "transparent", fontSize: 18, color: "#8a8ca5", cursor: "pointer", padding: "4px 8px", borderRadius: 4 }}
                   >
                     ✕
                   </button>
