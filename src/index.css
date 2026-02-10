@@ -27,3 +27,24 @@ textarea:focus,
 input:focus {
   outline: none;
 }
+
+/* Mobile bottom sheet animations */
+@keyframes sheetSlideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+@keyframes sheetSlideDown {
+  from { transform: translateY(0); }
+  to { transform: translateY(100%); }
+}
+
+@keyframes sheetBackdropIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes sheetBackdropOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
