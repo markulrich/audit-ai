@@ -126,12 +126,16 @@ For each finding:
 2. Verify factual accuracy against your knowledge
 3. Add contradicting evidence or caveats as "contraryEvidence"
 4. Assign a certainty score (1-99%):
-   - 95-99%: Factual, backed by 3+ corroborating evidence items, 0 contradictions
-   - 85-94%: Strong, 2+ evidence items agree
-   - 70-84%: Moderate, credible with caveats or forward-looking
-   - 50-69%: Mixed, significant uncertainty or weak evidence
+   - 95-99%: Factual, backed by 3+ verified (verified: true) evidence items, 0 contradictions
+   - 85-94%: Strong, 2+ verified evidence items agree
+   - 70-84%: Moderate, at least 1 verified source, credible with caveats
+   - 50-69%: Mixed, significant uncertainty or only partially verified
    - 25-49%: Weak or speculative, little evidence support
    - 1-24%: Very weak, no real evidence backing
+
+CERTAINTY CAP FOR UNVERIFIED EVIDENCE:
+- If a finding is supported ONLY by unverified evidence (verified: false or absent), its certainty MUST NOT exceed 50%. Unverified evidence is LLM knowledge — it could be hallucinated.
+- Only verified evidence (verified: true, with a real URL) can push certainty above 50%.
 
 CRITICAL RULES FOR REMOVAL:
 - The more high-certainty findings you have, the HIGHER your bar should be for keeping weaker ones. If most findings are 85%+, remove anything below ~40%. If most findings are moderate (60-80%), keep everything above ~25%.
